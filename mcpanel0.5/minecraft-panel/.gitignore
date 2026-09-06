@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+
+# Runtime config (contains JWT secret and local paths)
+config.json
+
+# User data (password hashes, audit trail)
+data/
+
+# Caddy
+Caddyfile
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store

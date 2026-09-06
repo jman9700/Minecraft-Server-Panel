@@ -1,0 +1,16 @@
+{
+  "name": "minecraft-server-panel",
+  "version": "1.0.0-alpha",
+  "description": "Secure web panel for managing a CurseForge modded Minecraft server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "setup": "node setup.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.0"
+  }
+}

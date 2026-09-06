@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MC Server Panel</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep:     #0c0e14;
+      --bg-surface:  #13161f;
+      --bg-card:     #1a1e2a;
+      --bg-raised:   #222738;
+      --border:      #2a2f42;
+      --border-lit:  #3d4460;
+      --text:        #d4d8e8;
+      --text-dim:    #7a82a0;
+      --text-muted:  #4e5470;
+      --accent:      #5b8af5;
+      --accent-glow: rgba(91,138,245,0.15);
+      --green:       #4ade80;
+      --green-dim:   rgba(74,222,128,0.12);
+      --red:         #f87171;
+      --red-dim:     rgba(248,113,113,0.12);
+      --amber:       #fbbf24;
+      --amber-dim:   rgba(251,191,36,0.12);
+    }
+
+    body {
+      font-family: 'Outfit', sans-serif;
+      background: var(--bg-deep);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ── Login Screen ────────────────────────────── */
+    #login-screen {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(91,138,245,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse at 70% 80%, rgba(74,222,128,0.04) 0%, transparent 60%),
+        var(--bg-deep);
+    }
+
+    .login-box {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 48px 40px;
+      width: 380px;
+      max-width: 90vw;
+    }
+
+    .login-box h1 {
+      font-size: 22px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      letter-spacing: -0.3px;
+    }
+
+    .login-box .subtitle {
+      color: var(--text-dim);
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+
+    .field { margin-bottom: 18px; }
+
+    .field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .field input {
+      width: 100%;
+      padding: 11px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .field input:focus { border-color: var(--accent); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-card);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn:hover { background: var(--bg-raised); border-color: var(--border-lit); }
+    .btn:active { transform: scale(0.98); }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      width: 100%;
+      padding: 12px;
+      font-size: 15px;
+      margin-top: 8px;
+    }
+
+    .btn-primary:hover { background: #4a7ae4; }
+
+    .btn-green  { border-color: var(--green); color: var(--green); background: var(--green-dim); }
+    .btn-red    { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+    .btn-amber  { border-color: var(--amber); color: var(--amber); background: var(--amber-dim); }
+
+    .login-error {
+      background: var(--red-dim);
+      color: var(--red);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 16px;
+      display: none;
+    }
+
+    /* ── App Shell ────────────────────────────────── */
+    #app-screen { display: none; min-height: 100vh; }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 28px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .topbar h2 {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.2px;
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-green  { background: var(--green-dim); color: var(--green); }
+    .badge-red    { background: var(--red-dim);   color: var(--red);   }
+    .badge-amber  { background: var(--amber-dim); color: var(--amber); }
+
+    /* ── Tab Nav ──────────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      gap: 2px;
+      padding: 12px 28px 0;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      padding: 10px 20px;
+      font-family: 'Outfit', sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    .tab-content { display: none; padding: 28px; max-width: 1100px; margin: 0 auto; }
+    .tab-content.active { display: block; }
+
+    /* ── Console ──────────────────────────────────── */
+    .console-wrap {
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .console-output {
+      height: 400px;
+      overflow-y: auto;
+      padding: 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: #a0aec0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .console-output .line-err  { color: var(--red); }
+    .console-output .line-cmd  { color: var(--green); }
+    .console-output .line-sys  { color: var(--amber); }
+
+    .console-input-row {
+      display: flex;
+      border-top: 1px solid var(--border);
+    }
+
+    .console-input-row span {
+      padding: 12px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--accent);
+      background: #0d0f15;
+    }
+
+    .console-input-row input {
+      flex: 1;
+      padding: 12px;
+      background: #0d0f15;
+      border: none;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      outline: none;
+    }
+
+    /* ── Control buttons ─────────────────────────── */
+    .controls-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    /* ── File browser ────────────────────────────── */
+    .breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-dim);
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .breadcrumb button {
+      background: none;
+      border: none;
+      color: var(--accent);
+      font-family: 'Outfit', sans-serif;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+
+    .breadcrumb button:hover { text-decoration: underline; }
+    .breadcrumb .sep { color: var(--text-muted); }
+
+    .file-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .file-table th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .file-table td {
+      padding: 10px 14px;
+      font-size: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .file-table tr:hover td { background: var(--bg-card); }
+
+    .file-table .fname {
+      cursor: pointer;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .file-table .fname:hover { color: var(--accent); }
+    .file-table .ficon { font-size: 16px; width: 20px; text-align: center; }
+
+    .file-preview {
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-top: 16px;
+      max-height: 500px;
+      overflow: auto;
+    }
+
+    .file-preview pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      line-height: 1.7;
+      color: #a0aec0;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .file-preview-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .file-preview-header h3 {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    /* ── User management ─────────────────────────── */
+    .user-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .user-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+    }
+
+    .user-card h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .perm-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .perm-tag {
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--accent-glow);
+      color: var(--accent);
+      border: 1px solid rgba(91,138,245,0.2);
+    }
+
+    .user-card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .user-card-actions .btn { font-size: 12px; padding: 6px 12px; }
+
+    /* ── Modal ────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 200;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 32px;
+      width: 440px;
+      max-width: 92vw;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+
+    .modal h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 20px;
+    }
+
+    .checkbox-group { margin-bottom: 18px; }
+
+    .checkbox-group label {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 0;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .checkbox-group input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--accent);
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 24px;
+    }
+
+    /* ── Audit log ───────────────────────────────── */
+    .audit-log {
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      max-height: 500px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1.8;
+      color: #a0aec0;
+    }
+
+    /* ── Utilities ────────────────────────────────── */
+    .mt-16 { margin-top: 16px; }
+    .mb-20 { margin-bottom: 20px; }
+    .text-dim { color: var(--text-dim); font-size: 13px; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .section-header h3 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    @media (max-width: 640px) {
+      .tab-bar { padding: 8px 12px 0; overflow-x: auto; }
+      .tab-btn { padding: 8px 12px; font-size: 12px; }
+      .tab-content { padding: 16px; }
+      .controls-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════ LOGIN ════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <h1>⛏ MC Server Panel</h1>
+    <p class="subtitle">Sign in to manage your server</p>
+    <div class="login-error" id="login-error"></div>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="login-user" autocomplete="username" autofocus>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="login-pass" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" onclick="doLogin()">Sign In</button>
+  </div>
+</div>
+
+<!-- ════ APP ══════════════════════════════════════════════ -->
+<div id="app-screen">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h2>⛏ MC Server Panel</h2>
+      <span class="badge" id="status-badge">—</span>
+    </div>
+    <div class="topbar-right">
+      <span id="user-display"></span>
+      <button class="btn" onclick="doLogout()" style="font-size:12px; padding:6px 14px;">Sign out</button>
+    </div>
+  </div>
+
+  <div class="tab-bar" id="tab-bar">
+    <button class="tab-btn active" data-tab="console">Console</button>
+    <button class="tab-btn" data-tab="files">Files</button>
+    <button class="tab-btn" data-tab="users" id="tab-users-btn">Users</button>
+    <button class="tab-btn" data-tab="audit" id="tab-audit-btn">Audit Log</button>
+  </div>
+
+  <!-- ── Console Tab ──────────────────────────── -->
+  <div class="tab-content active" id="tab-console">
+    <div class="controls-row" id="control-buttons"></div>
+    <div class="console-wrap">
+      <div class="console-output" id="console-output"></div>
+      <div class="console-input-row" id="console-input-row" style="display:none">
+        <span>&gt;</span>
+        <input type="text" id="console-input" placeholder="Type a server command..." />
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Files Tab ────────────────────────────── -->
+  <div class="tab-content" id="tab-files">
+    <div class="breadcrumb" id="breadcrumb"></div>
+    <table class="file-table" id="file-table">
+      <thead><tr><th>Name</th><th>Size</th><th>Modified</th></tr></thead>
+      <tbody id="file-tbody"></tbody>
+    </table>
+    <div class="file-preview" id="file-preview" style="display:none">
+      <div class="file-preview-header">
+        <h3 id="preview-filename"></h3>
+        <button class="btn" onclick="closePreview()" style="font-size:12px; padding:4px 12px;">✕ Close</button>
+      </div>
+      <pre id="preview-content"></pre>
+    </div>
+  </div>
+
+  <!-- ── Users Tab ────────────────────────────── -->
+  <div class="tab-content" id="tab-users">
+    <div class="section-header">
+      <h3>Whitelisted Users</h3>
+      <button class="btn btn-primary" onclick="openAddUser()" style="width:auto; padding:8px 18px;">+ Add User</button>
+    </div>
+    <div class="user-grid" id="user-grid"></div>
+  </div>
+
+  <!-- ── Audit Tab ────────────────────────────── -->
+  <div class="tab-content" id="tab-audit">
+    <div class="section-header">
+      <h3>Audit Log</h3>
+      <button class="btn" onclick="loadAudit()">Refresh</button>
+    </div>
+    <div class="audit-log" id="audit-log">Loading...</div>
+  </div>
+</div>
+
+<!-- ════ MODAL ════════════════════════════════════════════ -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  State
+// ════════════════════════════════════════════════════════════
+let token = localStorage.getItem("mcp_token");
+let currentUser = null;
+let currentPerms = [];
+let pollInterval = null;
+
+const API = "";  // same origin
+
+// ════════════════════════════════════════════════════════════
+//  API Helpers
+// ════════════════════════════════════════════════════════════
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { "Content-Type": "application/json" }
+  };
+  if (token) opts.headers["Authorization"] = "Bearer " + token;
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  const data = await res.json();
+  if (res.status === 401) { doLogout(); throw new Error("Session expired"); }
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+// ════════════════════════════════════════════════════════════
+//  Auth
+// ════════════════════════════════════════════════════════════
+async function doLogin() {
+  const user = document.getElementById("login-user").value.trim();
+  const pass = document.getElementById("login-pass").value;
+  const errEl = document.getElementById("login-error");
+  errEl.style.display = "none";
+
+  if (!user || !pass) { errEl.textContent = "Both fields required"; errEl.style.display = "block"; return; }
+
+  try {
+    const data = await api("POST", "/api/login", { username: user, password: pass });
+    token = data.token;
+    localStorage.setItem("mcp_token", token);
+    currentUser = data.username;
+    currentPerms = data.permissions;
+    showApp();
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.style.display = "block";
+  }
+}
+
+function doLogout() {
+  token = null;
+  currentUser = null;
+  currentPerms = [];
+  localStorage.removeItem("mcp_token");
+  if (pollInterval) clearInterval(pollInterval);
+  document.getElementById("login-screen").style.display = "flex";
+  document.getElementById("app-screen").style.display = "none";
+}
+
+// Enter key on password field
+document.getElementById("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+document.getElementById("login-user").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("login-pass").focus(); });
+
+// ════════════════════════════════════════════════════════════
+//  App Init
+// ════════════════════════════════════════════════════════════
+function showApp() {
+  document.getElementById("login-screen").style.display = "none";
+  document.getElementById("app-screen").style.display = "block";
+  document.getElementById("user-display").textContent = currentUser;
+
+  // Parse token to get perms if we reloaded
+  if (!currentPerms.length && token) {
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      currentUser = payload.username;
+      currentPerms = payload.permissions || [];
+      document.getElementById("user-display").textContent = currentUser;
+    } catch { doLogout(); return; }
+  }
+
+  buildControls();
+  setupTabs();
+  startPolling();
+  if (hasPerm("browse_files")) loadFiles(".");
+}
+
+function hasPerm(p) { return currentPerms.includes(p); }
+
+// ════════════════════════════════════════════════════════════
+//  Tabs
+// ════════════════════════════════════════════════════════════
+function setupTabs() {
+  // Hide tabs the user can't access
+  document.getElementById("tab-users-btn").style.display = hasPerm("manage_users") ? "" : "none";
+  document.getElementById("tab-audit-btn").style.display = hasPerm("view_audit")   ? "" : "none";
+  document.getElementById("tab-files").style.display     = "none";
+
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+      btn.classList.add("active");
+      document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+
+      if (btn.dataset.tab === "users" && hasPerm("manage_users")) loadUsers();
+      if (btn.dataset.tab === "audit" && hasPerm("view_audit"))   loadAudit();
+      if (btn.dataset.tab === "files" && hasPerm("browse_files")) loadFiles(".");
+    });
+  });
+}
+
+// ════════════════════════════════════════════════════════════
+//  Server Controls
+// ════════════════════════════════════════════════════════════
+function buildControls() {
+  const row = document.getElementById("control-buttons");
+  row.innerHTML = "";
+
+  if (hasPerm("start")) {
+    const b = document.createElement("button");
+    b.className = "btn btn-green";
+    b.innerHTML = "▶ Start";
+    b.onclick = () => serverAction("/api/server/start", "Start server?");
+    row.appendChild(b);
+  }
+  if (hasPerm("restart")) {
+    const b = document.createElement("button");
+    b.className = "btn btn-amber";
+    b.innerHTML = "↻ Restart";
+    b.onclick = () => serverAction("/api/server/restart", "Restart server? Players will be disconnected.");
+    row.appendChild(b);
+  }
+  if (hasPerm("kill")) {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.innerHTML = "⏹ Stop";
+    b.onclick = () => serverAction("/api/server/stop", "Gracefully stop the server?");
+    row.appendChild(b);
+
+    const k = document.createElement("button");
+    k.className = "btn btn-red";
+    k.innerHTML = "✕ Force Kill";
+    k.onclick = () => serverAction("/api/server/kill", "FORCE KILL the server? This can corrupt world data!");
+    row.appendChild(k);
+  }
+
+  // Console input
+  const inputRow = document.getElementById("console-input-row");
+  inputRow.style.display = hasPerm("console") ? "flex" : "none";
+}
+
+async function serverAction(endpoint, confirmMsg) {
+  if (!confirm(confirmMsg)) return;
+  try {
+    await api("POST", endpoint);
+  } catch (e) {
+    alert("Error: " + e.message);
+  }
+}
+
+// Console input
+document.getElementById("console-input").addEventListener("keydown", async e => {
+  if (e.key === "Enter") {
+    const input = e.target;
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    try {
+      await api("POST", "/api/server/command", { command: cmd });
+      input.value = "";
+    } catch (err) {
+      alert("Error: " + err.message);
+    }
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+//  Polling — Status + Console output
+// ════════════════════════════════════════════════════════════
+function startPolling() {
+  fetchStatus();
+  pollInterval = setInterval(fetchStatus, 3000);
+}
+
+async function fetchStatus() {
+  try {
+    const data = await api("GET", "/api/status");
+    updateStatus(data.status);
+    renderConsole(data.output);
+  } catch { /* ignore polling errors */ }
+}
+
+function updateStatus(status) {
+  const badge = document.getElementById("status-badge");
+  badge.textContent = status.toUpperCase();
+  badge.className = "badge";
+  if (status === "running")  badge.classList.add("badge-green");
+  else if (status === "stopped") badge.classList.add("badge-red");
+  else badge.classList.add("badge-amber");
+}
+
+function renderConsole(lines) {
+  const el = document.getElementById("console-output");
+  const wasAtBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 20;
+
+  el.innerHTML = lines.map(line => {
+    let cls = "";
+    if (line.startsWith("[ERR]"))   cls = "line-err";
+    else if (line.startsWith("[CMD]"))   cls = "line-cmd";
+    else if (line.startsWith("[Panel]")) cls = "line-sys";
+    return `<div class="${cls}">${escapeHtml(line)}</div>`;
+  }).join("");
+
+  if (wasAtBottom) el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ════════════════════════════════════════════════════════════
+//  File Browser
+// ════════════════════════════════════════════════════════════
+let currentPath = ".";
+
+async function loadFiles(p) {
+  currentPath = p;
+  try {
+    const data = await api("GET", "/api/files?path=" + encodeURIComponent(p));
+    if (data.type === "directory") renderDirectory(data);
+    else renderFile(data);
+  } catch (e) {
+    alert("File error: " + e.message);
+  }
+}
+
+function renderDirectory(data) {
+  document.getElementById("file-preview").style.display = "none";
+  document.getElementById("file-table").style.display = "";
+
+  // Breadcrumb
+  const bc = document.getElementById("breadcrumb");
+  const parts = data.path === "." ? ["root"] : ["root", ...data.path.split(/[/\\]/)];
+  bc.innerHTML = "";
+  let pathSoFar = ".";
+  parts.forEach((part, i) => {
+    if (i > 0) {
+      bc.innerHTML += '<span class="sep">/</span>';
+      pathSoFar = pathSoFar === "." ? part : pathSoFar + "/" + part;
+    }
+    const p2 = pathSoFar;
+    const btn = document.createElement("button");
+    btn.textContent = part;
+    btn.onclick = () => loadFiles(p2);
+    bc.appendChild(btn);
+  });
+
+  // Table
+  const tbody = document.getElementById("file-tbody");
+  tbody.innerHTML = "";
+
+  // Add parent ".." if not at root
+  if (data.path !== ".") {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><span class="fname" onclick="loadFiles('${parentPath(data.path)}')">..</span></td><td></td><td></td>`;
+    tbody.appendChild(tr);
+  }
+
+  data.entries.forEach(entry => {
+    const tr = document.createElement("tr");
+    const childPath = data.path === "." ? entry.name : data.path + "/" + entry.name;
+    const icon = entry.isDirectory ? "📁" : fileIcon(entry.name);
+    const size = entry.isDirectory ? "—" : formatSize(entry.size);
+    const mod = entry.modified ? new Date(entry.modified).toLocaleString() : "—";
+    tr.innerHTML = `
+      <td><span class="fname" onclick="loadFiles('${escapePath(childPath)}')">
+        <span class="ficon">${icon}</span> ${escapeHtml(entry.name)}
+      </span></td>
+      <td class="text-dim">${size}</td>
+      <td class="text-dim">${mod}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function renderFile(data) {
+  document.getElementById("file-table").style.display = "none";
+  const preview = document.getElementById("file-preview");
+  preview.style.display = "block";
+  document.getElementById("preview-filename").textContent = data.name;
+  document.getElementById("preview-content").textContent = data.content || data.message || "(empty)";
+}
+
+function closePreview() {
+  document.getElementById("file-preview").style.display = "none";
+  document.getElementById("file-table").style.display = "";
+  loadFiles(currentPath.includes("/") ? parentPath(currentPath) : ".");
+}
+
+function parentPath(p) {
+  const parts = p.split(/[/\\]/);
+  parts.pop();
+  return parts.length ? parts.join("/") : ".";
+}
+
+function escapePath(p) { return p.replace(/'/g, "\\'"); }
+
+function fileIcon(name) {
+  const ext = name.split(".").pop().toLowerCase();
+  const icons = { json:"📄", yml:"⚙️", yaml:"⚙️", properties:"⚙️", toml:"⚙️", cfg:"⚙️",
+                  log:"📜", txt:"📝", jar:"☕", bat:"🖥️", sh:"🖥️", png:"🖼️", jpg:"🖼️" };
+  return icons[ext] || "📄";
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1048576) return (bytes/1024).toFixed(1) + " KB";
+  return (bytes/1048576).toFixed(1) + " MB";
+}
+
+// ════════════════════════════════════════════════════════════
+//  User Management
+// ════════════════════════════════════════════════════════════
+const ALL_PERMS = [
+  { key: "start",        label: "Start server" },
+  { key: "restart",      label: "Restart server" },
+  { key: "kill",         label: "Stop / Kill server" },
+  { key: "browse_files", label: "Browse server files" },
+  { key: "console",      label: "Send console commands" },
+  { key: "manage_users", label: "Manage users (admin)" },
+  { key: "view_audit",   label: "View audit log" }
+];
+
+async function loadUsers() {
+  try {
+    const users = await api("GET", "/api/users");
+    const grid = document.getElementById("user-grid");
+    grid.innerHTML = "";
+    users.forEach(u => {
+      const card = document.createElement("div");
+      card.className = "user-card";
+      card.innerHTML = `
+        <h3>${escapeHtml(u.username)}
+          ${u.disabled ? '<span class="badge badge-red">disabled</span>' : ''}
+        </h3>
+        <div class="perm-list">
+          ${u.permissions.map(p => `<span class="perm-tag">${p}</span>`).join("")}
+          ${u.permissions.length === 0 ? '<span class="text-dim">No permissions</span>' : ''}
+        </div>
+        <div class="text-dim">Created: ${u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}</div>
+        <div class="user-card-actions">
+          <button class="btn" onclick="openEditUser('${escapeHtml(u.username)}', ${JSON.stringify(u.permissions).replace(/"/g,'&quot;')}, ${u.disabled})">Edit</button>
+          <button class="btn btn-red" onclick="deleteUser('${escapeHtml(u.username)}')">Delete</button>
+        </div>`;
+      grid.appendChild(card);
+    });
+  } catch (e) {
+    alert("Error loading users: " + e.message);
+  }
+}
+
+function openAddUser() {
+  openModal(`
+    <h2>Add User</h2>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="new-username" />
+    </div>
+    <div class="field">
+      <label>Password (min 8 chars)</label>
+      <input type="password" id="new-password" />
+    </div>
+    <div class="checkbox-group">
+      <label style="font-weight:600; margin-bottom:4px; color:var(--text-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.8px; cursor:default;">Permissions</label>
+      ${ALL_PERMS.map(p => `<label><input type="checkbox" value="${p.key}" class="new-perm-cb"> ${p.label}</label>`).join("")}
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" style="width:auto" onclick="submitAddUser()">Create User</button>
+    </div>
+  `);
+}
+
+async function submitAddUser() {
+  const username = document.getElementById("new-username").value.trim();
+  const password = document.getElementById("new-password").value;
+  const perms = [...document.querySelectorAll(".new-perm-cb:checked")].map(cb => cb.value);
+
+  try {
+    await api("POST", "/api/users", { username, password, permissions: perms });
+    closeModal();
+    loadUsers();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function openEditUser(username, perms, disabled) {
+  openModal(`
+    <h2>Edit: ${escapeHtml(username)}</h2>
+    <div class="checkbox-group">
+      <label style="font-weight:600; margin-bottom:4px; color:var(--text-dim); font-size:12px; text-transform:uppercase; letter-spacing:0.8px; cursor:default;">Permissions</label>
+      ${ALL_PERMS.map(p => `<label><input type="checkbox" value="${p.key}" class="edit-perm-cb" ${perms.includes(p.key)?'checked':''}> ${p.label}</label>`).join("")}
+    </div>
+    <div class="field">
+      <label>New Password (leave blank to keep)</label>
+      <input type="password" id="edit-password" />
+    </div>
+    <div class="checkbox-group">
+      <label><input type="checkbox" id="edit-disabled" ${disabled?'checked':''}> Disable account</label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" style="width:auto" onclick="submitEditUser('${escapeHtml(username)}')">Save Changes</button>
+    </div>
+  `);
+}
+
+async function submitEditUser(username) {
+  const perms = [...document.querySelectorAll(".edit-perm-cb:checked")].map(cb => cb.value);
+  const disabled = document.getElementById("edit-disabled").checked;
+  const password = document.getElementById("edit-password").value;
+
+  const body = { permissions: perms, disabled };
+  if (password) body.password = password;
+
+  try {
+    await api("PUT", "/api/users/" + encodeURIComponent(username), body);
+    closeModal();
+    loadUsers();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+async function deleteUser(username) {
+  if (!confirm(`Delete user "${username}"? This cannot be undone.`)) return;
+  try {
+    await api("DELETE", "/api/users/" + encodeURIComponent(username));
+    loadUsers();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  Audit Log
+// ════════════════════════════════════════════════════════════
+async function loadAudit() {
+  try {
+    const data = await api("GET", "/api/audit");
+    const el = document.getElementById("audit-log");
+    el.textContent = data.lines.length ? data.lines.join("\n") : "No audit entries yet.";
+    el.scrollTop = el.scrollHeight;
+  } catch (e) {
+    document.getElementById("audit-log").textContent = "Error loading audit log.";
+  }
+}
+
+// ════════════════════════════════════════════════════════════
+//  Modal
+// ════════════════════════════════════════════════════════════
+function openModal(html) {
+  document.getElementById("modal-content").innerHTML = html;
+  document.getElementById("modal-overlay").classList.add("open");
+}
+
+function closeModal() {
+  document.getElementById("modal-overlay").classList.remove("open");
+}
+
+document.getElementById("modal-overlay").addEventListener("click", e => {
+  if (e.target === e.currentTarget) closeModal();
+});
+
+// ════════════════════════════════════════════════════════════
+//  Boot
+// ════════════════════════════════════════════════════════════
+if (token) {
+  // Try to resume session
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    if (payload.exp * 1000 > Date.now()) {
+      currentUser = payload.username;
+      currentPerms = payload.permissions || [];
+      showApp();
+    } else {
+      doLogout();
+    }
+  } catch { doLogout(); }
+}
+</script>
+</body>
+</html>
