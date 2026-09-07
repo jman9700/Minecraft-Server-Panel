@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # PANEL_URL / PANEL_TEST_USER / PANEL_TEST_PASS are configured as
+    # secrets on the "test" environment, so the job must opt into it.
+    environment: test
+
     # The test project lives in a subdirectory of the repo.
     defaults:
       run:
