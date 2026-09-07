@@ -4,6 +4,10 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
+// Shared storage-state file produced by tests/auth.setup.ts. Keep this
+// path in sync with the one in that file.
+const authFile = 'playwright/.auth/user.json';
+
 /**
  * Playwright config for the Minecraft panel.
  * Docs: https://playwright.dev/docs/test-configuration
@@ -44,12 +48,28 @@ export default defineConfig({
   },
 
   projects: [
+    // Logs in once and writes the JWT (localStorage["mcp_token"]) to
+    // `authFile`. Matched by filename, so the default *.spec.ts projects
+    // never pick it up.
+    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+
+    // The login flow itself must run logged OUT -- no storageState, no
+    // dependency on `setup`.
     {
-      name: 'chromium',
+      name: 'logged-out',
+      testMatch: /login\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
+
+    // Everything else starts already authenticated from the saved state.
+    {
+      name: 'chromium',
+      testIgnore: /login\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], storageState: authFile },
+      dependencies: ['setup'],
+    },
     // Uncomment as needed once the core suite is stable
-    // { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
-    // { name: 'webkit', use: { ...devices['Desktop Safari'] } },
+    // { name: 'firefox', use: { ...devices['Desktop Firefox'], storageState: authFile }, dependencies: ['setup'] },
+    // { name: 'webkit', use: { ...devices['Desktop Safari'], storageState: authFile }, dependencies: ['setup'] },
   ],
 });
