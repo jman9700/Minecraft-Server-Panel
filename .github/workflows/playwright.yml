@@ -35,22 +35,25 @@ jobs:
       PANEL_TEST_PASS: ${{ secrets.PANEL_TEST_PASS }}
 
     steps:
-      # Fail fast with a clear message if the secrets aren't configured,
-      # instead of a stack trace from inside a test file. Never prints
-      # the values, only whether each is present.
+      - uses: actions/checkout@v4
+
+      # Fail fast with a clear message if the "test" environment secrets
+      # aren't configured, instead of a stack trace from inside a test
+      # file. Never prints the values, only whether each is present.
+      # Runs from the repo root since the job default working-directory
+      # (panel-testing) only matters once we're installing/testing.
       - name: Check required secrets
+        working-directory: ${{ github.workspace }}
         run: |
           missing=
           [ -z "$PANEL_TEST_USER" ] && missing="$missing PANEL_TEST_USER"
           [ -z "$PANEL_TEST_PASS" ] && missing="$missing PANEL_TEST_PASS"
           [ -z "$PANEL_URL" ] && echo "note: PANEL_URL is unset; playwright.config.ts will use its built-in default"
           if [ -n "$missing" ]; then
-            echo "::error::Missing repository secret(s):$missing -- add them under Settings > Secrets and variables > Actions"
+            echo "::error::Missing secret(s) on the 'test' environment:$missing -- add them under Settings > Environments > test"
             exit 1
           fi
           echo "Required secrets are present."
-
-      - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
