@@ -543,7 +543,7 @@
 
   <div class="tab-bar" id="tab-bar">
     <button class="tab-btn active" data-tab="console">Console</button>
-    <button class="tab-btn" data-tab="files">Files</button>
+    <button class="tab-btn" data-tab="files" id="tab-files-btn">Files</button>
     <button class="tab-btn" data-tab="users" id="tab-users-btn">Users</button>
     <button class="tab-btn" data-tab="audit" id="tab-audit-btn">Audit Log</button>
   </div>
@@ -699,7 +699,7 @@ function setupTabs() {
   // Hide tabs the user can't access
   document.getElementById("tab-users-btn").style.display = hasPerm("manage_users") ? "" : "none";
   document.getElementById("tab-audit-btn").style.display = hasPerm("view_audit")   ? "" : "none";
-  document.getElementById("tab-files").style.display     = "none";
+  document.getElementById("tab-files-btn").style.display = hasPerm("browse_files") ? "" : "none";
 
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
