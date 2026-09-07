@@ -1,5 +1,5 @@
 node_modules/
 .env
 playwright-report/
-playwright/.auth/
+**/playwright/.auth/
 test-results/
