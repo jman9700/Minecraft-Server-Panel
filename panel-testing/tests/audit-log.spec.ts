@@ -33,9 +33,16 @@ test.describe('Audit log', () => {
     );
   });
 
+  // Not sure if the method that this is using is thourough enough to catch all destructive controls, but it should be good enough for now.
+  // in the furture, a more exhaustive list of destructive controls should be maintained and checked against, but for now this is a good start.
   test('exposes no destructive controls', async ({ page }) => {
     await expect(
       page.getByRole('button', { name: /delete|clear log|purge/i })
+    ).toHaveCount(0);
+
+    // Need to check for links too, since the audit log is a <div> and not a table.
+    await expect(
+      page.getByRole('link', { name: /delete|clear log|purge/i })
     ).toHaveCount(0);
   });
 });
