@@ -30,7 +30,8 @@ const PASS = process.env.PANEL_TEST_PASS;
 
 if (!USER || !PASS) {
   throw new Error(
-    'PANEL_TEST_USER and PANEL_TEST_PASS must be set in panel-testing/.env'
+    'PANEL_TEST_USER and PANEL_TEST_PASS must be set: panel-testing/.env locally, ' +
+      'or repository Actions secrets in CI'
   );
 }
 
