@@ -1,0 +1,68 @@
+name: Playwright Tests
+
+on:
+  push:
+  pull_request:
+    branches: [master]
+
+# One run per branch; a new push cancels the previous run for that ref.
+concurrency:
+  group: playwright-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Playwright (chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # The test project lives in a subdirectory of the repo.
+    defaults:
+      run:
+        working-directory: panel-testing
+
+    # playwright.config.ts reads these from process.env (dotenv only fills
+    # in vars that aren't already set), and login.spec.ts / auth.setup.ts
+    # read the user/pass directly. Set them under
+    # Settings > Secrets and variables > Actions.
+    env:
+      PANEL_URL: ${{ secrets.PANEL_URL }}
+      PANEL_TEST_USER: ${{ secrets.PANEL_TEST_USER }}
+      PANEL_TEST_PASS: ${{ secrets.PANEL_TEST_PASS }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: panel-testing/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npx playwright test
+
+      # HTML report: keep on both pass and fail so a green run is still
+      # inspectable. Open locally with `npx playwright show-report`.
+      - name: Upload HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: panel-testing/playwright-report/
+          retention-days: 30
+
+      # Traces + failure screenshots, only worth keeping when something broke.
+      - name: Upload test-results (traces, screenshots)
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: panel-testing/test-results/
+          retention-days: 30
