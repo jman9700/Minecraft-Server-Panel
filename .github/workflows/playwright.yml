@@ -37,6 +37,10 @@ jobs:
       # PANEL_GUEST_USER defaults to "guest" in the specs if unset.
       PANEL_GUEST_USER: ${{ secrets.PANEL_GUEST_USER }}
       PANEL_GUEST_PASS: ${{ secrets.PANEL_GUEST_PASS }}
+      # Only needed if the panel under test runs a non-default
+      # PANEL_LOGIN_MAX_ATTEMPTS -- lockout.spec.ts must use the same
+      # number. Defaults to 5 in the spec when unset.
+      PANEL_LOGIN_MAX_ATTEMPTS: ${{ vars.PANEL_LOGIN_MAX_ATTEMPTS }}
 
     steps:
       - uses: actions/checkout@v4

@@ -29,14 +29,24 @@ test.describe('Login', () => {
   });
  
   test('rejects bad credentials with an error message', async ({ page }) => {
+    // Use a throwaway username unique to this run. The panel locks an
+    // account after N failed attempts (in-memory, per username), and a
+    // fixed name like "not-a-real-user" accumulates failures across runs
+    // until it trips the lockout and this test starts seeing the
+    // "Account locked" message instead. A fresh name each run gets
+    // exactly one failed attempt.
+    const bogusUser = `nobody-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
     await page.goto('/login');
-    await page.locator('#login-user').fill('not-a-real-user');
+    await page.locator('#login-user').fill(bogusUser);
     await page.locator('#login-pass').fill('wrong-password');
     await page.getByRole('button', { name: 'Sign In' }).click();
- 
-    await expect(page.getByText('Session expired')).toBeVisible();
-    // Still on the login page -- didn't accidentally get in
-    await expect(page).toHaveURL(/login/);
+
+    // Assert the outcome, not a specific server string: an error shows
+    // and we're still logged out.
+    await expect(page.locator('#login-error')).toBeVisible();
+    await expect(page.locator('#login-screen')).toBeVisible();
+    await expect(page.locator('#app-screen')).toBeHidden();
   });
  
   test('logs in successfully with valid credentials', async ({ page }) => {

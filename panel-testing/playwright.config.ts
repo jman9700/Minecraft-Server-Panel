@@ -54,11 +54,11 @@ export default defineConfig({
     // default *.spec.ts projects never pick these up.
     { name: 'setup', testMatch: /(auth|guest)\.setup\.ts/ },
 
-    // The login flow itself must run logged OUT -- no storageState, no
-    // dependency on `setup`.
+    // Auth-surface specs that run logged OUT -- the login flow and the
+    // account-lockout check. No storageState, no dependency on `setup`.
     {
       name: 'logged-out',
-      testMatch: /login\.spec\.ts/,
+      testMatch: /(login|lockout)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
 
@@ -74,7 +74,7 @@ export default defineConfig({
     // Everything else starts already authenticated as Test_Account.
     {
       name: 'chromium',
-      testIgnore: /(login|guest)\.spec\.ts/,
+      testIgnore: /(login|guest|lockout)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], storageState: authFile },
       dependencies: ['setup'],
     },
