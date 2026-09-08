@@ -623,7 +623,10 @@ async function api(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(API + path, opts);
   const data = await res.json();
-  if (res.status === 401) { doLogout(); throw new Error("Session expired"); }
+  // A 401 from a normal API call means the session died -- bounce to
+  // login. A 401 from /api/login itself is just a bad username/password,
+  // so let its error message through instead (issue #8).
+  if (res.status === 401 && path !== "/api/login") { doLogout(); throw new Error("Session expired"); }
   if (!res.ok) throw new Error(data.error || "Request failed");
   return data;
 }

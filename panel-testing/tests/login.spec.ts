@@ -42,11 +42,16 @@ test.describe('Login', () => {
     await page.locator('#login-pass').fill('wrong-password');
     await page.getByRole('button', { name: 'Sign In' }).click();
 
-    // Assert the outcome, not a specific server string: an error shows
-    // and we're still logged out.
-    await expect(page.locator('#login-error')).toBeVisible();
+    // An error shows and we're still logged out...
+    const err = page.locator('#login-error');
+    await expect(err).toBeVisible();
     await expect(page.locator('#login-screen')).toBeVisible();
     await expect(page.locator('#app-screen')).toBeHidden();
+
+    // ...and it names the real problem, not a stale-session message
+    // (issue #8: bad logins used to surface "Session expired").
+    await expect(err).not.toHaveText(/session expired/i);
+    await expect(err).toHaveText(/password/i);
   });
  
   test('logs in successfully with valid credentials', async ({ page }) => {

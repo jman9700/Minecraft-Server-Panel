@@ -22,7 +22,9 @@ const DEFAULT_CONFIG = {
   startCommand: "start.bat",                    // the CurseForge launch script
   tokenExpiryHours: 8,
   maxLoginAttempts: 5,
-  lockoutMinutes: 15
+  lockoutMinutes: 15,
+  loginRateMax: 10,          // max /api/login requests per IP per window
+  loginRateWindowMs: 60000
 };
 
 function loadConfig() {
@@ -36,16 +38,19 @@ function loadConfig() {
 const config = loadConfig();
 
 // ── Login throttling knobs ──────────────────────────────────
-// Defaults match what shipped in config.json; env vars override them so
-// CI / test deployments can loosen or tighten without editing the file.
-function envInt(name, fallback) {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+// Each comes from config.json, with a PANEL_LOGIN_* env var override on
+// top (handy for CI / test deployments) and a hard default last.
+function loginKnob(envName, cfgKey, fallback) {
+  const fromEnv = Number(process.env[envName]);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.floor(fromEnv);
+  const fromCfg = Number(config[cfgKey]);
+  if (Number.isFinite(fromCfg) && fromCfg > 0) return Math.floor(fromCfg);
+  return fallback;
 }
-const LOGIN_MAX_ATTEMPTS    = envInt("PANEL_LOGIN_MAX_ATTEMPTS", config.maxLoginAttempts ?? 5);
-const LOGIN_LOCKOUT_MINUTES = envInt("PANEL_LOGIN_LOCKOUT_MINUTES", config.lockoutMinutes ?? 15);
-const LOGIN_RATE_MAX        = envInt("PANEL_LOGIN_RATE_MAX", 10);
-const LOGIN_RATE_WINDOW_MS  = envInt("PANEL_LOGIN_RATE_WINDOW_MS", 60000);
+const LOGIN_MAX_ATTEMPTS    = loginKnob("PANEL_LOGIN_MAX_ATTEMPTS", "maxLoginAttempts", 5);
+const LOGIN_LOCKOUT_MINUTES = loginKnob("PANEL_LOGIN_LOCKOUT_MINUTES", "lockoutMinutes", 15);
+const LOGIN_RATE_MAX        = loginKnob("PANEL_LOGIN_RATE_MAX", "loginRateMax", 10);
+const LOGIN_RATE_WINDOW_MS  = loginKnob("PANEL_LOGIN_RATE_WINDOW_MS", "loginRateWindowMs", 60000);
 
 // ── Ensure data directory ───────────────────────────────────
 if (!fs.existsSync(path.join(__dirname, "data"))) {
@@ -261,7 +266,7 @@ app.post("/api/login", async (req, res) => {
   const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
   if (!user) {
     recordFailedLogin(username);
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({ error: "Incorrect Username and/or Password" });
   }
 
   if (user.disabled) {
@@ -272,7 +277,7 @@ app.post("/api/login", async (req, res) => {
   if (!match) {
     recordFailedLogin(username);
     audit(username, "LOGIN_FAILED");
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({ error: "Incorrect Username and/or Password" });
   }
 
   clearLoginAttempts(username);
