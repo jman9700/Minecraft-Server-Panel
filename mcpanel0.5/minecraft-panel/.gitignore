@@ -9,6 +9,7 @@ data/
 
 # Caddy
 Caddyfile
+caddy_windows_amd64_custom.exe
 
 # OS junk
 Thumbs.db
