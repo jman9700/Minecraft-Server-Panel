@@ -58,7 +58,7 @@ export default defineConfig({
     // account-lockout check. No storageState, no dependency on `setup`.
     {
       name: 'logged-out',
-      testMatch: /(login|lockout)\.spec\.ts/,
+      testMatch: /(login|lockout|session-isolation)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
 
@@ -74,7 +74,7 @@ export default defineConfig({
     // Everything else starts already authenticated as Test_Account.
     {
       name: 'chromium',
-      testIgnore: /(login|guest|lockout)\.spec\.ts/,
+      testIgnore: /(login|guest|lockout|session-isolation)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], storageState: authFile },
       dependencies: ['setup'],
     },
