@@ -4,9 +4,10 @@ import path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '.env') });
 
-// Shared storage-state file produced by tests/auth.setup.ts. Keep this
-// path in sync with the one in that file.
-const authFile = 'playwright/.auth/user.json';
+// Storage-state files produced by the *.setup.ts specs. Keep these paths
+// in sync with the ones in those files.
+const authFile = 'playwright/.auth/user.json';        // privileged Test_Account
+const guestAuthFile = 'playwright/.auth/guest.json';  // low-privilege guest
 
 /**
  * Playwright config for the Minecraft panel.
@@ -48,10 +49,10 @@ export default defineConfig({
   },
 
   projects: [
-    // Logs in once and writes the JWT (localStorage["mcp_token"]) to
-    // `authFile`. Matched by filename, so the default *.spec.ts projects
-    // never pick it up.
-    { name: 'setup', testMatch: /auth\.setup\.ts/ },
+    // Logs in once per account and writes the JWT (localStorage
+    // ["mcp_token"]) to a storageState file. Matched by filename, so the
+    // default *.spec.ts projects never pick these up.
+    { name: 'setup', testMatch: /(auth|guest)\.setup\.ts/ },
 
     // The login flow itself must run logged OUT -- no storageState, no
     // dependency on `setup`.
@@ -61,10 +62,19 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
 
-    // Everything else starts already authenticated from the saved state.
+    // Guest permission checks -- authenticated as the low-privilege guest
+    // from guest.setup.ts.
+    {
+      name: 'guest',
+      testMatch: /guest\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'], storageState: guestAuthFile },
+      dependencies: ['setup'],
+    },
+
+    // Everything else starts already authenticated as Test_Account.
     {
       name: 'chromium',
-      testIgnore: /login\.spec\.ts/,
+      testIgnore: /(login|guest)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], storageState: authFile },
       dependencies: ['setup'],
     },
