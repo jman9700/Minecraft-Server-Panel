@@ -655,12 +655,37 @@ async function doLogin() {
   }
 }
 
+// Wipe everything a signed-in session rendered, so the next person to
+// use this browser can't see the previous user's data (issue #10:
+// e.g. an admin leaves the Users tab open, signs out, a guest signs in
+// and the user list is still on screen).
+function resetAppUI() {
+  document.getElementById("user-grid").innerHTML = "";
+  document.getElementById("console-output").innerHTML = "";
+  document.getElementById("audit-log").textContent = "Loading...";
+  document.getElementById("file-tbody").innerHTML = "";
+  document.getElementById("breadcrumb").innerHTML = "";
+  document.getElementById("file-preview").style.display = "none";
+  document.getElementById("file-table").style.display = "";
+  document.getElementById("control-buttons").innerHTML = "";
+  document.getElementById("user-display").textContent = "";
+  document.getElementById("console-input-row").style.display = "none";
+  closeModal();
+
+  // Always land back on the Console tab.
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+  document.querySelector('.tab-btn[data-tab="console"]').classList.add("active");
+  document.getElementById("tab-console").classList.add("active");
+}
+
 function doLogout() {
   token = null;
   currentUser = null;
   currentPerms = [];
   localStorage.removeItem("mcp_token");
   if (pollInterval) clearInterval(pollInterval);
+  resetAppUI();
   document.getElementById("login-screen").style.display = "flex";
   document.getElementById("app-screen").style.display = "none";
 }
@@ -673,6 +698,9 @@ document.getElementById("login-user").addEventListener("keydown", e => { if (e.k
 //  App Init
 // ════════════════════════════════════════════════════════════
 function showApp() {
+  // Clear any leftover UI from a previous session before showing this one.
+  resetAppUI();
+
   document.getElementById("login-screen").style.display = "none";
   document.getElementById("app-screen").style.display = "block";
   document.getElementById("user-display").textContent = currentUser;
@@ -703,6 +731,11 @@ function setupTabs() {
   document.getElementById("tab-users-btn").style.display = hasPerm("manage_users") ? "" : "none";
   document.getElementById("tab-audit-btn").style.display = hasPerm("view_audit")   ? "" : "none";
   document.getElementById("tab-files-btn").style.display = hasPerm("browse_files") ? "" : "none";
+
+  // Wire click handlers once, not on every login (showApp calls this each
+  // time -- re-adding would stack duplicate listeners).
+  if (setupTabs._wired) return;
+  setupTabs._wired = true;
 
   document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.addEventListener("click", () => {
