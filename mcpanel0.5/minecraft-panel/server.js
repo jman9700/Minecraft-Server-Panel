@@ -22,7 +22,9 @@ const DEFAULT_CONFIG = {
   startCommand: "start.bat",                    // the CurseForge launch script
   tokenExpiryHours: 8,
   maxLoginAttempts: 5,
-  lockoutMinutes: 15
+  lockoutMinutes: 15,
+  loginRateMax: 10,          // max /api/login requests per IP per window
+  loginRateWindowMs: 60000
 };
 
 function loadConfig() {
@@ -34,6 +36,21 @@ function loadConfig() {
 }
 
 const config = loadConfig();
+
+// ── Login throttling knobs ──────────────────────────────────
+// Each comes from config.json, with a PANEL_LOGIN_* env var override on
+// top (handy for CI / test deployments) and a hard default last.
+function loginKnob(envName, cfgKey, fallback) {
+  const fromEnv = Number(process.env[envName]);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return Math.floor(fromEnv);
+  const fromCfg = Number(config[cfgKey]);
+  if (Number.isFinite(fromCfg) && fromCfg > 0) return Math.floor(fromCfg);
+  return fallback;
+}
+const LOGIN_MAX_ATTEMPTS    = loginKnob("PANEL_LOGIN_MAX_ATTEMPTS", "maxLoginAttempts", 5);
+const LOGIN_LOCKOUT_MINUTES = loginKnob("PANEL_LOGIN_LOCKOUT_MINUTES", "lockoutMinutes", 15);
+const LOGIN_RATE_MAX        = loginKnob("PANEL_LOGIN_RATE_MAX", "loginRateMax", 10);
+const LOGIN_RATE_WINDOW_MS  = loginKnob("PANEL_LOGIN_RATE_WINDOW_MS", "loginRateWindowMs", 60000);
 
 // ── Ensure data directory ───────────────────────────────────
 if (!fs.existsSync(path.join(__dirname, "data"))) {
@@ -71,8 +88,8 @@ function checkLockout(username) {
 function recordFailedLogin(username) {
   if (!loginAttempts[username]) loginAttempts[username] = { count: 0 };
   loginAttempts[username].count++;
-  if (loginAttempts[username].count >= config.maxLoginAttempts) {
-    loginAttempts[username].lockedUntil = Date.now() + config.lockoutMinutes * 60 * 1000;
+  if (loginAttempts[username].count >= LOGIN_MAX_ATTEMPTS) {
+    loginAttempts[username].lockedUntil = Date.now() + LOGIN_LOCKOUT_MINUTES * 60 * 1000;
   }
 }
 
@@ -226,8 +243,8 @@ app.use("/api/login", (req, res, next) => {
   const ip = req.ip;
   const now = Date.now();
   if (!loginRateMap[ip]) loginRateMap[ip] = [];
-  loginRateMap[ip] = loginRateMap[ip].filter(t => now - t < 60000);
-  if (loginRateMap[ip].length >= 10) {
+  loginRateMap[ip] = loginRateMap[ip].filter(t => now - t < LOGIN_RATE_WINDOW_MS);
+  if (loginRateMap[ip].length >= LOGIN_RATE_MAX) {
     return res.status(429).json({ error: "Too many requests. Try again later." });
   }
   loginRateMap[ip].push(now);
@@ -242,14 +259,14 @@ app.post("/api/login", async (req, res) => {
   }
 
   if (checkLockout(username)) {
-    return res.status(423).json({ error: `Account locked. Try again in ${config.lockoutMinutes} minutes.` });
+    return res.status(423).json({ error: `Account locked. Try again in ${LOGIN_LOCKOUT_MINUTES} minutes.` });
   }
 
   const users = loadUsers();
   const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
   if (!user) {
     recordFailedLogin(username);
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({ error: "Incorrect Username and/or Password" });
   }
 
   if (user.disabled) {
@@ -260,7 +277,7 @@ app.post("/api/login", async (req, res) => {
   if (!match) {
     recordFailedLogin(username);
     audit(username, "LOGIN_FAILED");
-    return res.status(401).json({ error: "Invalid credentials" });
+    return res.status(401).json({ error: "Incorrect Username and/or Password" });
   }
 
   clearLoginAttempts(username);
