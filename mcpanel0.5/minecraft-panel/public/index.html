@@ -481,6 +481,14 @@
       font-size: 12px;
       line-height: 1.8;
       color: #a0aec0;
+      /* loadAudit() joins entries with "\n". Without pre-wrap the default
+         white-space collapses those into spaces and the whole log runs
+         together as one paragraph. */
+      white-space: pre-wrap;
+      text-align: left;
+      /* A long detail (e.g. a console command with a path) shouldn't push
+         the box sideways. */
+      overflow-wrap: anywhere;
     }
 
     /* ── Utilities ────────────────────────────────── */

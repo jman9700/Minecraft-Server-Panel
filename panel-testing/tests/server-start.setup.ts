@@ -1,8 +1,12 @@
 import { test as setup, expect, type APIRequestContext } from '@playwright/test';
+import path from 'path';
+import fs from 'fs';
 import {
   SERVER_STARTUP_LENGTH_MS,
   SERVER_STARTUP_LENGTH_SECONDS,
   SERVER_STATUS_POLL_MS,
+  SERVER_STATE_FILE,
+  type ServerState,
 } from './test-config';
 
 /**
@@ -11,10 +15,15 @@ import {
  * running server declares `dependencies: ['server-start']` in
  * playwright.config.ts (currently just console-guard.spec.ts).
  *
+ * Paired with server-stop.teardown.ts via the project's `teardown`, so
+ * the two bookend the dependent specs: start -> specs -> stop. Playwright
+ * runs the teardown once this project and everything depending on it has
+ * finished, pass or fail.
+ *
  * If the server is already up this is a no-op, so it's safe to run
- * repeatedly. It deliberately does NOT stop the server afterwards --
- * the point is to leave it running for the dependent specs, and stopping
- * someone's game server as test teardown would be a nasty surprise.
+ * repeatedly. It records which of those two happened in
+ * SERVER_STATE_FILE, so the teardown only stops a server this run
+ * actually started -- see that file for why.
  *
  * mcStatus only flips to "running" when the server prints its
  * "Done (...)! For help, type ..." line, so a pack that doesn't print it
@@ -32,6 +41,13 @@ if (!USER || !PASS) {
   );
 }
 
+const stateFile = path.resolve(__dirname, '..', SERVER_STATE_FILE);
+
+function recordState(state: ServerState) {
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+}
+
 type Status = { status: string; output: string[] };
 
 async function readStatus(request: APIRequestContext, auth: Record<string, string>) {
@@ -44,6 +60,10 @@ setup('minecraft server is running', async ({ request }) => {
   // The poll loop can legitimately run the full startup window.
   setup.setTimeout(SERVER_STARTUP_LENGTH_MS + 30_000);
 
+  // Assume we didn't start it until we know otherwise -- a crash midway
+  // through should never leave the teardown thinking it owns the server.
+  recordState({ startedByTests: false });
+
   const login = await request.post('/api/login', {
     data: { username: USER, password: PASS },
   });
@@ -51,17 +71,21 @@ setup('minecraft server is running', async ({ request }) => {
   const auth = { Authorization: `Bearer ${(await login.json()).token}` };
 
   if ((await readStatus(request, auth)).status === 'running') {
-    return; // Already up -- nothing to do.
+    return; // Already up -- not ours to stop.
   }
 
   const start = await request.post('/api/server/start', { headers: auth });
   if (!start.ok()) {
     const { error } = await start.json();
-    // Another run may have started it in the gap since we checked.
+    // Another run may have started it in the gap since we checked -- in
+    // which case it isn't ours to stop either.
     if (!/already running/i.test(error ?? '')) {
       throw new Error(`Could not start the Minecraft server: ${error}`);
     }
+    return;
   }
+
+  recordState({ startedByTests: true });
 
   const deadline = Date.now() + SERVER_STARTUP_LENGTH_MS;
   let last: Status = { status: 'unknown', output: [] };
