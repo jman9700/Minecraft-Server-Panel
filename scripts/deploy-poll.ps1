@@ -40,12 +40,12 @@
 
 .EXAMPLE
     # One-off check (what Task Scheduler runs)
-    powershell -ExecutionPolicy Bypass -File C:\Users\jman9\mc-panel-tests\scripts\deploy-poll.ps1
+    powershell -ExecutionPolicy Bypass -File C:\path\to\Minecraft-Server-Panel\scripts\deploy-poll.ps1
 
 .EXAMPLE
     # Register it to run every 2 minutes
     $action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument '-NoProfile -ExecutionPolicy Bypass -File C:\Users\jman9\mc-panel-tests\scripts\deploy-poll.ps1'
+        -Argument '-NoProfile -ExecutionPolicy Bypass -File C:\path\to\Minecraft-Server-Panel\scripts\deploy-poll.ps1'
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
         -RepetitionInterval (New-TimeSpan -Minutes 2)
     Register-ScheduledTask -TaskName 'MCPanel Deploy Poll' -Action $action -Trigger $trigger

@@ -1,8 +1,9 @@
 {
   "_comment": "Copy to deploy.config.json (gitignored) on the box and fill in. Nothing here is secret except username/password, which is why the real file stays out of git.",
 
-  "repoPath": "C:\\Users\\jman9\\mc-panel-tests",
-  "panelDir": "C:\\Users\\jman9\\mc-panel-tests\\mcpanel0.5\\minecraft-panel",
+  "_paths": "Absolute paths on the box. Backslashes must be doubled -- this is JSON.",
+  "repoPath": "C:\\path\\to\\Minecraft-Server-Panel",
+  "panelDir": "C:\\path\\to\\Minecraft-Server-Panel\\mcpanel0.5\\minecraft-panel",
   "_branch": "Always the deploy ref -- CI moves it. Do NOT point this at release or dev directly, or staged PRs will never reach the box. See .github/workflows/playwright.yml.",
   "branch": "deploy",
 
