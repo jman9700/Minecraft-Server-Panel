@@ -6,6 +6,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const { spawn, execSync } = require("child_process");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -36,6 +37,31 @@ function loadConfig() {
 }
 
 const config = loadConfig();
+
+// ── Panel version ───────────────────────────────────────────
+//
+// A fingerprint of the panel's own deployed source, so the test suite
+// can tell "this panel is running older code than the repo" apart from
+// "this feature is broken". Without it, a stale deploy shows up as a
+// pile of confusing assertion diffs.
+//
+// Derived from the files rather than a hand-bumped constant so it can't
+// drift: change either file and the fingerprint changes, no discipline
+// required. Line endings are normalised because the repo is checked out
+// CRLF on Windows and LF on the CI runner, and we want to compare
+// content, not checkout style.
+const PANEL_SOURCE_FILES = ["server.js", path.join("public", "index.html")];
+
+function computePanelVersion() {
+  const hash = crypto.createHash("sha256");
+  for (const rel of PANEL_SOURCE_FILES) {
+    hash.update(rel.replace(/\\/g, "/"));
+    hash.update(fs.readFileSync(path.join(__dirname, rel), "utf-8").replace(/\r\n/g, "\n"));
+  }
+  return hash.digest("hex").slice(0, 12);
+}
+
+const PANEL_VERSION = computePanelVersion();
 
 // ── Login throttling knobs ──────────────────────────────────
 // Each comes from config.json, with a PANEL_LOGIN_* env var override on
@@ -289,6 +315,13 @@ app.post("/api/login", async (req, res) => {
 // ── Server control routes ───────────────────────────────────
 app.get("/api/status", authMiddleware, (req, res) => {
   res.json({ status: mcStatus, output: mcOutput });
+});
+
+// Behind auth on purpose: the repo is public, so an unauthenticated
+// fingerprint would let anyone map the deployment to an exact commit and
+// look up which fixes it's missing.
+app.get("/api/version", authMiddleware, (req, res) => {
+  res.json({ version: PANEL_VERSION, files: PANEL_SOURCE_FILES });
 });
 
 app.post("/api/server/start", authMiddleware, requirePermission("start"), (req, res) => {
@@ -567,6 +600,7 @@ app.listen(config.port, "0.0.0.0", () => {
   console.log(`   Running on http://localhost:${config.port}`);
   console.log(`   LAN access: http://<YOUR_IP>:${config.port}`);
   console.log(`   Server dir: ${config.serverDir}`);
+  console.log(`   Panel version: ${PANEL_VERSION}`);
   console.log("═══════════════════════════════════════════════════════");
   console.log("");
   if (!fs.existsSync(USERS_PATH) || loadUsers().length === 0) {
