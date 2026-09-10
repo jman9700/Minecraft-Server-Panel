@@ -62,6 +62,19 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
 
+    // Brings the Minecraft server up (no-op if it's already running).
+    // Kept separate from `setup` so specs that don't need a live server
+    // never wait on it.
+    { name: 'server-start', testMatch: /server-start\.setup\.ts/ },
+
+    // Specs that only mean anything against a running Minecraft server.
+    {
+      name: 'server-running',
+      testMatch: /console-guard\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['server-start'],
+    },
+
     // Guest permission checks -- authenticated as the low-privilege guest
     // from guest.setup.ts.
     {
@@ -74,7 +87,7 @@ export default defineConfig({
     // Everything else starts already authenticated as Test_Account.
     {
       name: 'chromium',
-      testIgnore: /(login|guest|lockout|session-isolation)\.spec\.ts/,
+      testIgnore: /(login|guest|lockout|session-isolation|console-guard)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'], storageState: authFile },
       dependencies: ['setup'],
     },
