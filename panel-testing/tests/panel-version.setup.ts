@@ -1,7 +1,5 @@
 import { test as setup, expect } from '@playwright/test';
 import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
 
 /**
  * Gate: does the panel we're testing actually run the code in this repo?
@@ -17,16 +15,23 @@ import crypto from 'crypto';
  * burying the reason. Notably it also runs before server-start, so a
  * stale box never gets a Minecraft server spun up for nothing.
  *
- * The fingerprint is computed the same way server.js does it -- the same
- * files, line endings normalised, sha256, first 12 hex. Keep the two in
- * step: PANEL_SOURCE_FILES / computePanelVersion() there, and this file
- * here.
+ * The expected fingerprint comes from scripts/panel-fingerprint.js, the
+ * one implementation shared with the CI workflow that waits for a staged
+ * deploy to land. server.js keeps its own copy on purpose -- it
+ * fingerprints itself and must stay self-contained -- so the algorithm
+ * lives in exactly two places, each with a note pointing at the other.
  *
  * Escape hatch: PANEL_SKIP_VERSION_CHECK=1 to run against a knowingly
  * stale panel (e.g. checking whether an auth fix survived a deploy).
  */
+// Playwright compiles these specs to CommonJS, so require() reaches the
+// plain .js helper outside panel-testing/ with no module juggling.
+const {
+  panelFingerprint,
+  PANEL_SOURCE_FILES,
+} = require(path.resolve(__dirname, '..', '..', 'scripts', 'panel-fingerprint.js'));
+
 const PANEL_ROOT = path.resolve(__dirname, '..', '..', 'mcpanel0.5', 'minecraft-panel');
-const PANEL_SOURCE_FILES = ['server.js', path.join('public', 'index.html')];
 
 const USER = process.env.PANEL_TEST_USER;
 const PASS = process.env.PANEL_TEST_PASS;
@@ -39,19 +44,7 @@ if (!USER || !PASS) {
 }
 
 function expectedVersion() {
-  const hash = crypto.createHash('sha256');
-  for (const rel of PANEL_SOURCE_FILES) {
-    const file = path.join(PANEL_ROOT, rel);
-    if (!fs.existsSync(file)) {
-      throw new Error(
-        `Cannot fingerprint the panel: ${file} is missing. This spec expects the ` +
-          `panel source to sit alongside panel-testing/ in the same checkout.`
-      );
-    }
-    hash.update(rel.replace(/\\/g, '/'));
-    hash.update(fs.readFileSync(file, 'utf-8').replace(/\r\n/g, '\n'));
-  }
-  return hash.digest('hex').slice(0, 12);
+  return panelFingerprint(PANEL_ROOT);
 }
 
 setup('panel matches this checkout', async ({ request }) => {
