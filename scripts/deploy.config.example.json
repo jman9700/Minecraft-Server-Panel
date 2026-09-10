@@ -3,7 +3,8 @@
 
   "repoPath": "C:\\Users\\jman9\\mc-panel-tests",
   "panelDir": "C:\\Users\\jman9\\mc-panel-tests\\mcpanel0.5\\minecraft-panel",
-  "branch": "dev",
+  "_branch": "Always the deploy ref -- CI moves it. Do NOT point this at release or dev directly, or staged PRs will never reach the box. See .github/workflows/playwright.yml.",
+  "branch": "deploy",
 
   "_panelUrl": "Hit the panel directly on localhost -- no TLS, no round trip through Caddy.",
   "panelUrl": "http://localhost:3847",

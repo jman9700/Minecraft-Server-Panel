@@ -1,34 +1,131 @@
-name: Playwright Tests
+name: CI
+
+# Staged-deploy CI.
+#
+# `release` is what the box runs. `dev` is where work happens. Opening a
+# PR into `release` stages that code onto the box first, so the suite
+# tests the real panel actually running the change rather than whatever
+# was deployed last.
+#
+# The box never receives a push. It polls one ref -- `deploy` -- via
+# scripts/deploy-poll.ps1, and this workflow is what moves that ref:
+#
+#   PR opened/updated -> release   ->  deploy = PR head
+#   push to release (merge landed) ->  deploy = release
+#   PR closed, or the suite fails  ->  deploy = release  (rollback)
+#
+# So there is still no inbound port on the box; CI just changes what the
+# poller finds next time it looks.
 
 on:
-  push:
   pull_request:
-    branches: [master]
+    types: [opened, synchronize, reopened, closed]
+    branches: [release]
+  push:
+    branches: [release]
 
-# One run per branch; a new push cancels the previous run for that ref.
+# The box is a single machine. Never let two runs stage onto it at once,
+# and do not cancel a run midway -- a cancelled run could leave `deploy`
+# pointing at an abandoned commit.
 concurrency:
-  group: playwright-${{ github.ref }}
-  cancel-in-progress: true
+  group: panel-box
+  cancel-in-progress: false
+
+permissions:
+  contents: write # to move the `deploy` ref
+
+env:
+  DEPLOY_REF: deploy
+  # How long to wait for the box's poller to pick up a staged commit.
+  # Must comfortably exceed the poller's interval.
+  DEPLOY_WAIT_SECONDS: 600
 
 jobs:
+  # ── Decide what the box should be running, and point `deploy` at it ──
+  stage:
+    name: Stage onto the box
+    runs-on: ubuntu-latest
+    # Fork PRs get no secrets and a read-only token, so they cannot stage
+    # onto the box -- which is exactly what we want. Skip them explicitly
+    # rather than failing on a permission error.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    outputs:
+      sha: ${{ steps.pick.outputs.sha }}
+      testing: ${{ steps.pick.outputs.testing }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pick the target commit
+        id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            sha="${{ github.sha }}"
+            testing=true
+            echo "Merge landed on release -- returning the box to the release line."
+          elif [ "${{ github.event.action }}" = "closed" ]; then
+            sha="$(git rev-parse origin/${{ github.base_ref }})"
+            testing=false
+            echo "PR closed -- returning the box to ${{ github.base_ref }}."
+          else
+            sha="${{ github.event.pull_request.head.sha }}"
+            testing=true
+            echo "Staging PR head onto the box so the suite tests it live."
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "testing=$testing" >> "$GITHUB_OUTPUT"
+          echo "Target: $sha"
+
+      - name: Move the deploy ref
+        run: |
+          git push --force origin "${{ steps.pick.outputs.sha }}:refs/heads/${DEPLOY_REF}"
+          echo "::notice::${DEPLOY_REF} now points at ${{ steps.pick.outputs.sha }}. The box picks this up on its next poll."
+
+  # ── Wait for the box to actually be running it ──────────────────────
+  await-panel:
+    name: Wait for the box
+    needs: stage
+    if: needs.stage.outputs.testing == 'true'
+    runs-on: ubuntu-latest
+    environment: test
+    timeout-minutes: 15
+    env:
+      PANEL_URL: ${{ secrets.PANEL_URL }}
+      PANEL_TEST_USER: ${{ secrets.PANEL_TEST_USER }}
+      PANEL_TEST_PASS: ${{ secrets.PANEL_TEST_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.stage.outputs.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The panel fingerprints its own source at boot and serves it at
+      # /api/version. Poll until that matches the fingerprint of the
+      # commit we just staged -- proof the box is running this code, not
+      # merely that it is reachable.
+      - name: Poll /api/version until it matches
+        run: node scripts/ci-await-panel.js
+        env:
+          EXPECTED_FROM: ${{ github.workspace }}
+          DEPLOY_REF: ${{ env.DEPLOY_REF }}
+          DEPLOY_WAIT_SECONDS: ${{ env.DEPLOY_WAIT_SECONDS }}
+
+  # ── Now the suite means something ───────────────────────────────────
   test:
     name: Playwright (chromium)
+    needs: [stage, await-panel]
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
-    # PANEL_URL / PANEL_TEST_USER / PANEL_TEST_PASS are configured as
-    # secrets on the "test" environment, so the job must opt into it.
     environment: test
-
-    # The test project lives in a subdirectory of the repo.
     defaults:
       run:
         working-directory: panel-testing
-
-    # playwright.config.ts reads these from process.env (dotenv only fills
-    # in vars that aren't already set), and login.spec.ts / auth.setup.ts
-    # read the user/pass directly. Set them under
-    # Settings > Secrets and variables > Actions.
     env:
       PANEL_URL: ${{ secrets.PANEL_URL }}
       PANEL_TEST_USER: ${{ secrets.PANEL_TEST_USER }}
@@ -43,13 +140,15 @@ jobs:
       PANEL_LOGIN_MAX_ATTEMPTS: ${{ vars.PANEL_LOGIN_MAX_ATTEMPTS }}
 
     steps:
+      # Test the same commit that was staged, so the suite's own version
+      # gate agrees with what await-panel just confirmed.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.stage.outputs.sha }}
 
       # Fail fast with a clear message if the "test" environment secrets
       # aren't configured, instead of a stack trace from inside a test
       # file. Never prints the values, only whether each is present.
-      # Runs from the repo root since the job default working-directory
-      # (panel-testing) only matters once we're installing/testing.
       - name: Check required secrets
         working-directory: ${{ github.workspace }}
         run: |
@@ -58,7 +157,7 @@ jobs:
           [ -z "$PANEL_TEST_PASS" ] && missing="$missing PANEL_TEST_PASS"
           [ -z "$PANEL_GUEST_PASS" ] && missing="$missing PANEL_GUEST_PASS"
           [ -z "$PANEL_URL" ] && echo "note: PANEL_URL is unset; playwright.config.ts will use its built-in default"
-          [ -z "$PANEL_GUEST_USER" ] && echo "note: PANEL_GUEST_USER is unset; guest specs default to \"guest\""
+          [ -z "$PANEL_GUEST_USER" ] && echo "note: PANEL_GUEST_USER is unset; guest specs default to guest"
           if [ -n "$missing" ]; then
             echo "::error::Missing secret(s) on the 'test' environment:$missing -- add them under Settings > Environments > test"
             exit 1
@@ -98,3 +197,20 @@ jobs:
           name: test-results
           path: panel-testing/test-results/
           retention-days: 30
+
+  # ── Never leave the box on code that failed ─────────────────────────
+  rollback:
+    name: Roll the box back to release
+    needs: [stage, await-panel, test]
+    if: failure() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Point deploy back at ${{ github.base_ref }}
+        run: |
+          target="$(git rev-parse origin/${{ github.base_ref }})"
+          git push --force origin "$target:refs/heads/${DEPLOY_REF}"
+          echo "::warning::Run failed, so ${DEPLOY_REF} was reset to ${{ github.base_ref }} ($target). The box returns to known-good code on its next poll."
