@@ -58,8 +58,21 @@ export default defineConfig({
     // account-lockout check. No storageState, no dependency on `setup`.
     {
       name: 'logged-out',
-      testMatch: /(login|lockout|session-isolation|console-guard)\.spec\.ts/,
+      testMatch: /(login|lockout|session-isolation)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
+    },
+
+    // Brings the Minecraft server up (no-op if it's already running).
+    // Kept separate from `setup` so specs that don't need a live server
+    // never wait on it.
+    { name: 'server-start', testMatch: /server-start\.setup\.ts/ },
+
+    // Specs that only mean anything against a running Minecraft server.
+    {
+      name: 'server-running',
+      testMatch: /console-guard\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+      dependencies: ['server-start'],
     },
 
     // Guest permission checks -- authenticated as the low-privilege guest

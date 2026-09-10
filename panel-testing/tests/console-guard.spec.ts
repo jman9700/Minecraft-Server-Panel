@@ -11,10 +11,10 @@ import { test, expect } from '@playwright/test';
  * the layer an attacker would actually hit. Going through the UI would
  * only prove the browser is polite.
  *
- * Deliberately does NOT require the Minecraft server to be running. The
- * guard runs before sendCommand(), so a rejected command reports the
- * traversal error while an allowed one reports "Server is not running"
- * -- two distinct outcomes either way.
+ * Runs in the `server-running` project, which depends on
+ * server-start.setup.ts -- so the Minecraft server is up and an allowed
+ * command genuinely reaches its stdin rather than bouncing off
+ * "Server is not running".
  *
  * Needs an account with the `console` permission (PANEL_TEST_USER has
  * it); logs in inline rather than reusing storageState because this is a
@@ -61,12 +61,14 @@ test.describe('Console command guard', () => {
     });
   }
 
-  test('lets a command without ".." through the guard', async ({ request }) => {
+  test('lets a command without ".." through to the server', async ({ request }) => {
     const res = await send(request, 'say hello from playwright');
-    const error = res.ok() ? '' : (await res.json()).error ?? '';
-    // Either it reached the server process (200) or the server is
-    // stopped -- what matters is it wasn't blocked as traversal.
-    expect(error).not.toMatch(TRAVERSAL_ERROR);
+    // server-start.setup.ts guarantees the server is up, so this should
+    // actually reach its stdin -- not just avoid the traversal branch.
+    expect(
+      res.status(),
+      `expected the command to be accepted, got: ${await res.text()}`
+    ).toBe(200);
   });
 
   test('rejects an empty command without calling it a traversal', async ({ request }) => {
