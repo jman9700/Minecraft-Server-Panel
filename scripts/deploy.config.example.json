@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy to deploy.config.json (gitignored) on the box and fill in. Nothing here is secret except username/password, which is why the real file stays out of git.",
+
+  "repoPath": "C:\\Users\\jman9\\mc-panel-tests",
+  "panelDir": "C:\\Users\\jman9\\mc-panel-tests\\mcpanel0.5\\minecraft-panel",
+  "branch": "dev",
+
+  "_panelUrl": "Hit the panel directly on localhost -- no TLS, no round trip through Caddy.",
+  "panelUrl": "http://localhost:3847",
+
+  "_credentials": "Optional but recommended. Without them the script cannot tell whether Minecraft is running, so it loses its main safety check and will deploy regardless. Needs the 'kill' permission to stop the server when -Force is used.",
+  "username": "deploy-account",
+  "password": "",
+
+  "_pollSeconds": "Only used with -Loop. Task Scheduler supplies the interval otherwise.",
+  "pollSeconds": 120,
+
+  "logPath": ""
+}
