@@ -64,8 +64,18 @@ export default defineConfig({
 
     // Brings the Minecraft server up (no-op if it's already running).
     // Kept separate from `setup` so specs that don't need a live server
-    // never wait on it.
-    { name: 'server-start', testMatch: /server-start\.setup\.ts/ },
+    // never wait on it. `teardown` bookends it with server-stop, which
+    // Playwright runs once this project and everything depending on it
+    // has finished -- pass or fail.
+    {
+      name: 'server-start',
+      testMatch: /server-start\.setup\.ts/,
+      teardown: 'server-stop',
+    },
+
+    // Closing half of the bookend. Only stops a server that server-start
+    // actually started; see server-stop.teardown.ts.
+    { name: 'server-stop', testMatch: /server-stop\.teardown\.ts/ },
 
     // Specs that only mean anything against a running Minecraft server.
     {
