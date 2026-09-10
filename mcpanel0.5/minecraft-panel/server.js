@@ -349,10 +349,47 @@ app.post("/api/server/kill", authMiddleware, requirePermission("kill"), (req, re
   res.json({ ok: true });
 });
 
+// ── Console command guard ───────────────────────────────────
+//
+// Everything this panel is allowed to touch lives under one directory:
+// `config.serverDir` (set in config.json, which is gitignored because it
+// also holds the JWT secret). The file browser is already fenced into it
+// by safePath() below.
+//
+// The console is NOT fenced. Commands go straight to the Minecraft
+// server process's stdin, and plenty of them take paths -- so a relative
+// path with ".." in it can reach files outside serverDir entirely.
+// Until the console gets a proper path-aware allowlist, we reject ".."
+// outright.
+//
+// This is deliberately blunt: it also rejects harmless chat like
+// `say hmm...`. If a legitimate command ever needs "..", add a carve-out
+// here rather than loosening the rule.
+const CONSOLE_TRAVERSAL = "..";
+const CONSOLE_TRAVERSAL_ERROR =
+  'Command rejected: ".." is not allowed in console commands (paths must stay inside the server directory)';
+
+function hasTraversal(cmd) {
+  return cmd.includes(CONSOLE_TRAVERSAL);
+}
+
 app.post("/api/server/command", authMiddleware, requirePermission("console"), (req, res) => {
+  const cmd = req.body.command;
+
+  // An absent command is a client bug, not a security event -- don't audit it.
+  if (typeof cmd !== "string" || !cmd.trim()) {
+    return res.status(400).json({ error: "Command required" });
+  }
+
+  // A blocked traversal attempt IS worth keeping in the audit log.
+  if (hasTraversal(cmd)) {
+    audit(req.user.username, "CONSOLE_CMD_BLOCKED", cmd);
+    return res.status(400).json({ error: CONSOLE_TRAVERSAL_ERROR });
+  }
+
   try {
-    sendCommand(req.body.command);
-    audit(req.user.username, "CONSOLE_CMD", req.body.command);
+    sendCommand(cmd);
+    audit(req.user.username, "CONSOLE_CMD", cmd);
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: e.message });
