@@ -4,3 +4,7 @@ playwright-report/
 **/playwright/.auth/
 **/playwright/.state/
 test-results/
+
+# Deploy poller: local box config (panel credentials) and its log
+scripts/deploy.config.json
+scripts/deploy.log
