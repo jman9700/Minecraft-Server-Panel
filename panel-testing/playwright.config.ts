@@ -49,10 +49,20 @@ export default defineConfig({
   },
 
   projects: [
+    // Gate: is the deployed panel running this checkout's code? Everything
+    // else hangs off this (directly or through `setup` / `server-start`),
+    // so a stale deployment skips the suite with one legible failure
+    // instead of scattering confusing assertion diffs across it.
+    { name: 'version-check', testMatch: /panel-version\.setup\.ts/ },
+
     // Logs in once per account and writes the JWT (localStorage
     // ["mcp_token"]) to a storageState file. Matched by filename, so the
     // default *.spec.ts projects never pick these up.
-    { name: 'setup', testMatch: /(auth|guest)\.setup\.ts/ },
+    {
+      name: 'setup',
+      testMatch: /(auth|guest)\.setup\.ts/,
+      dependencies: ['version-check'],
+    },
 
     // Auth-surface specs that run logged OUT -- the login flow and the
     // account-lockout check. No storageState, no dependency on `setup`.
@@ -60,6 +70,7 @@ export default defineConfig({
       name: 'logged-out',
       testMatch: /(login|lockout|session-isolation)\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
+      dependencies: ['version-check'],
     },
 
     // Brings the Minecraft server up (no-op if it's already running).
@@ -71,6 +82,7 @@ export default defineConfig({
       name: 'server-start',
       testMatch: /server-start\.setup\.ts/,
       teardown: 'server-stop',
+      dependencies: ['version-check'],
     },
 
     // Closing half of the bookend. Only stops a server that server-start
