@@ -7,6 +7,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const zlib = require("zlib");
 const { spawn, execSync } = require("child_process");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -24,7 +25,8 @@ const DEFAULT_CONFIG = {
   tokenExpiryHours: 8,
   maxLoginAttempts: 5,
   lockoutMinutes: 15,
-  demoDir: "",               // where demo media lives; blank = public/demo
+  demoDir: "",               // where demo media lives; blank = ./demo
+  packDir: "",               // where modpack exports live; blank = ./packs
   loginRateMax: 10,          // max /api/login requests per IP per window
   loginRateWindowMs: 60000
 };
@@ -575,20 +577,142 @@ app.post("/api/backups", authMiddleware, requirePermission("create_backup"), asy
   }
 });
 
+// ── Modpack downloads ───────────────────────────────────────
+//
+// Hosts the CurseForge modpack export so players can grab the exact
+// profile the server runs. The export is manifest-only -- a list of
+// project/file IDs plus config overrides, no mod jars -- so there is
+// nothing here to redistribute improperly; the CurseForge client
+// resolves the IDs itself.
+//
+// Unlike demo media this is NOT under public/. It is served through an
+// authenticated route behind `download_pack`, so getting the pack means
+// having a panel account.
+//
+// The pack details shown in the UI come from parsing manifest.json out
+// of the zip. That is done with a minimal reader below rather than a zip
+// dependency on purpose: the deploy poller does `git reset --hard` and
+// restarts, but never runs `npm install`, so a new dependency would take
+// the panel down until someone installed it by hand.
+const PACK_DIR = config.packDir
+  ? path.resolve(config.packDir)
+  : path.join(__dirname, "packs");
+
+// Minimal zip reader: pulls one named entry out of an archive using only
+// zlib. Enough for manifest.json; not a general-purpose implementation.
+function readZipEntry(zipPath, wantedName) {
+  const buf = fs.readFileSync(zipPath);
+
+  // End of Central Directory: fixed 22-byte record, possibly followed by
+  // a comment, so scan backwards for the signature.
+  const EOCD_SIG = 0x06054b50;
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 66000; i--) {
+    if (buf.readUInt32LE(i) === EOCD_SIG) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Not a zip file (no end-of-central-directory record)");
+
+  const entryCount = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+
+  for (let n = 0; n < entryCount; n++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error("Corrupt central directory");
+    const method    = buf.readUInt16LE(p + 10);
+    const compSize  = buf.readUInt32LE(p + 20);
+    const nameLen   = buf.readUInt16LE(p + 28);
+    const extraLen  = buf.readUInt16LE(p + 30);
+    const commentLen= buf.readUInt16LE(p + 32);
+    const localOff  = buf.readUInt32LE(p + 42);
+    const name      = buf.toString("utf8", p + 46, p + 46 + nameLen);
+
+    if (name === wantedName) {
+      // The local header repeats name/extra lengths and they can differ
+      // from the central directory's, so read them from the local header.
+      if (buf.readUInt32LE(localOff) !== 0x04034b50) throw new Error("Corrupt local header");
+      const lNameLen  = buf.readUInt16LE(localOff + 26);
+      const lExtraLen = buf.readUInt16LE(localOff + 28);
+      const start = localOff + 30 + lNameLen + lExtraLen;
+      const data = buf.subarray(start, start + compSize);
+      if (method === 0) return data;                      // stored
+      if (method === 8) return zlib.inflateRawSync(data); // deflate
+      throw new Error(`Unsupported zip compression method ${method}`);
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return null;
+}
+
+function describePack(file) {
+  const full = path.join(PACK_DIR, file);
+  const stat = fs.statSync(full);
+  const info = {
+    name: file,
+    sizeBytes: stat.size,
+    modified: stat.mtime.toISOString(),
+    packName: null, minecraft: null, loader: null, modCount: null, manifestError: null
+  };
+  try {
+    const raw = readZipEntry(full, "manifest.json");
+    if (!raw) {
+      info.manifestError = "No manifest.json -- is this a CurseForge export?";
+      return info;
+    }
+    const m = JSON.parse(raw.toString("utf-8"));
+    info.packName = m.name || null;
+    info.minecraft = m.minecraft && m.minecraft.version ? m.minecraft.version : null;
+    const primary = (m.minecraft && m.minecraft.modLoaders || []).find(l => l.primary)
+      || (m.minecraft && m.minecraft.modLoaders || [])[0];
+    info.loader = primary ? primary.id : null;
+    info.modCount = Array.isArray(m.files) ? m.files.length : null;
+  } catch (e) {
+    info.manifestError = e.message;
+  }
+  return info;
+}
+
+app.get("/api/packs", authMiddleware, requirePermission("download_pack"), (req, res) => {
+  try {
+    if (!fs.existsSync(PACK_DIR)) return res.json({ packs: [], dir: PACK_DIR });
+    const packs = fs.readdirSync(PACK_DIR, { withFileTypes: true })
+      .filter(e => e.isFile() && path.extname(e.name).toLowerCase() === ".zip")
+      .map(e => describePack(e.name))
+      .sort((a, b) => b.modified.localeCompare(a.modified));
+    res.json({ packs, dir: PACK_DIR });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/packs/:name/download", authMiddleware, requirePermission("download_pack"), (req, res) => {
+  // basename strips any directory part, so ".." and absolute paths cannot
+  // escape PACK_DIR. The extension check keeps this route to zips only.
+  const name = path.basename(req.params.name);
+  if (path.extname(name).toLowerCase() !== ".zip") {
+    return res.status(400).json({ error: "Not a modpack file" });
+  }
+  const full = path.join(PACK_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: "Modpack not found" });
+
+  audit(req.user.username, "PACK_DOWNLOADED", name);
+  res.download(full, name);
+});
+
 // ── Demo media ──────────────────────────────────────────────
 //
 // Backs the Demo tab: a gallery of screenshots today, video next, and
 // eventually a playable demo. Media is read from `demoDir` (config.json),
 // defaulting to public/demo.
 //
-// Served by express.static rather than streamed through a handler, which
-// gets range requests for free -- that matters little for stills but is
-// what will make video seeking work without rewriting this.
+// Deliberately NOT under public/. It used to be, which made the files
+// readable by anyone who knew a URL -- a permission on the tab would not
+// have changed that, since public/ is served unauthenticated. Media now
+// goes through an authenticated route behind `view_demo`.
 //
-// Note this content is reachable WITHOUT logging in, same as everything
-// else under public/. That is the right default for demo material (an
-// <img> cannot send an Authorization header anyway), but it does mean
-// anything dropped in here is public to whoever can reach the panel.
+// The cost is that <img src> cannot send an Authorization header, so the
+// client fetches each image as a blob and points the tag at an object
+// URL. Range requests go with it, which will matter when video lands --
+// at that point this route needs to grow Range support rather than
+// getting it free from express.static.
 const DEMO_EXTENSIONS = {
   ".png": "image",
   ".jpg": "image",
@@ -599,20 +723,24 @@ const DEMO_EXTENSIONS = {
 
 const DEMO_DIR = config.demoDir
   ? path.resolve(config.demoDir)
-  : path.join(__dirname, "public", "demo");
+  : path.join(__dirname, "demo");
 
 function demoType(name) {
   return DEMO_EXTENSIONS[path.extname(name).toLowerCase()] || null;
 }
 
-// Only hand out recognised media types. If demoDir is ever pointed
-// somewhere with other files in it, they stay unreachable.
-app.use("/demo-files", (req, res, next) => {
-  if (!demoType(req.path)) return res.status(404).end();
-  next();
-}, express.static(DEMO_DIR, { fallthrough: false }));
+// Only recognised media types are reachable, so pointing demoDir at a
+// directory with other files in it does not expose them. basename strips
+// any directory part, so ".." cannot escape DEMO_DIR.
+app.get("/demo-files/:name", authMiddleware, requirePermission("view_demo"), (req, res) => {
+  const name = path.basename(req.params.name);
+  if (!demoType(name)) return res.status(404).json({ error: "Not a demo media file" });
+  const full = path.join(DEMO_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: "Not found" });
+  res.sendFile(full);
+});
 
-app.get("/api/demo/media", authMiddleware, (req, res) => {
+app.get("/api/demo/media", authMiddleware, requirePermission("view_demo"), (req, res) => {
   try {
     if (!fs.existsSync(DEMO_DIR)) return res.json({ items: [], dir: DEMO_DIR });
 
@@ -646,6 +774,8 @@ const VALID_PERMS = [
   "start", "restart", "kill", "browse_files", "console",
   "manage_users", "view_audit",
   "view_backups",   // see the backup indicator
+  "download_pack",  // list and download the CurseForge modpack export
+  "view_demo",      // see the Demo tab
   "create_backup"   // run a backup
 ];
 

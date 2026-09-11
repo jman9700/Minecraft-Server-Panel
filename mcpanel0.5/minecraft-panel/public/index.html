@@ -492,6 +492,37 @@
     }
 
     /* ── Audit log ───────────────────────────────── */
+    .pack-blurb {
+      color: var(--text-dim);
+      font-size: 13px;
+      margin-bottom: 18px;
+      max-width: 70ch;
+    }
+    .pack-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 18px;
+      margin-bottom: 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .pack-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .pack-meta {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      font-size: 12px; color: var(--text-dim);
+    }
+    .pack-meta .chip {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .pack-warn { color: var(--amber); font-size: 12px; margin-top: 6px; }
+
     /* ── Demo gallery ─────────────────────────── */
     .gallery-stage {
       position: relative;
@@ -663,6 +694,7 @@
     <button class="tab-btn" data-tab="users" id="tab-users-btn">Users</button>
     <button class="tab-btn" data-tab="audit" id="tab-audit-btn">Audit Log</button>
     <button class="tab-btn" data-tab="demo" id="tab-demo-btn">Demo</button>
+    <button class="tab-btn" data-tab="pack" id="tab-pack-btn">Modpack</button>
   </div>
 
   <!-- ── Console Tab ──────────────────────────── -->
@@ -742,6 +774,20 @@
 
     <div class="gallery-empty" id="gallery-empty">Loading demo media...</div>
   </div>
+
+  <!-- ── Modpack Tab ──────────────────────────── -->
+  <div class="tab-content" id="tab-pack">
+    <div class="section-header">
+      <h3>Modpack</h3>
+      <button class="btn" onclick="loadPacks()" style="font-size:12px; padding:4px 12px;">Refresh</button>
+    </div>
+    <p class="pack-blurb">
+      This is the CurseForge export matching what the server runs. Download it, then in the
+      CurseForge app choose <strong>Create Custom Profile &rarr; Import</strong> and pick the zip.
+      It lists the mods rather than containing them, so the app downloads them for you.
+    </p>
+    <div id="pack-list"></div>
+  </div>
 </div>
 
 <!-- ════ MODAL ════════════════════════════════════════════ -->
@@ -818,6 +864,7 @@ function resetAppUI() {
   document.getElementById("gallery-empty").textContent = "Loading demo media...";
   demoItems = [];
   demoIndex = 0;
+  releaseDemoBlobs();
   document.getElementById("backup-btn").style.display = "none";
   document.getElementById("backup-status").textContent = "Checking backups...";
   document.getElementById("console-output").innerHTML = "";
@@ -892,6 +939,8 @@ function setupTabs() {
   // The backup bar lives in the Files tab, so view_backups has to be able
   // to reach it -- otherwise that permission would silently do nothing for
   // anyone without browse_files. The file table itself stays gated below.
+  document.getElementById("tab-demo-btn").style.display = hasPerm("view_demo")     ? "" : "none";
+  document.getElementById("tab-pack-btn").style.display = hasPerm("download_pack") ? "" : "none";
   const canSeeFilesTab = hasPerm("browse_files") || hasPerm("view_backups");
   document.getElementById("tab-files-btn").style.display = canSeeFilesTab ? "" : "none";
   document.getElementById("file-table").style.display = hasPerm("browse_files") ? "" : "none";
@@ -911,7 +960,8 @@ function setupTabs() {
 
       if (btn.dataset.tab === "users" && hasPerm("manage_users")) loadUsers();
       if (btn.dataset.tab === "audit" && hasPerm("view_audit"))   loadAudit();
-      if (btn.dataset.tab === "demo") loadDemo();
+      if (btn.dataset.tab === "demo" && hasPerm("view_demo")) loadDemo();
+      if (btn.dataset.tab === "pack" && hasPerm("download_pack")) loadPacks();
       if (btn.dataset.tab === "files") {
         if (hasPerm("browse_files")) loadFiles(".");
         if (hasPerm("view_backups")) loadBackups();
@@ -1101,6 +1151,30 @@ function renderDirectory(data) {
 let demoItems = [];
 let demoIndex = 0;
 
+// Object URLs handed out for demo media, keyed by source URL. Demo media
+// sits behind auth now, and <img src> cannot send an Authorization
+// header -- so fetch the bytes with the token and point the tag at a blob
+// instead. Cached because the thumbnail strip and the main stage ask for
+// the same images, and revoked wholesale on sign-out so a session's
+// pictures do not outlive it in memory.
+const demoBlobUrls = new Map();
+
+async function demoBlobUrl(url) {
+  if (demoBlobUrls.has(url)) return demoBlobUrls.get(url);
+  const res = await fetch(API + url, {
+    headers: token ? { Authorization: "Bearer " + token } : {}
+  });
+  if (!res.ok) throw new Error(`Could not load ${url} (${res.status})`);
+  const objectUrl = URL.createObjectURL(await res.blob());
+  demoBlobUrls.set(url, objectUrl);
+  return objectUrl;
+}
+
+function releaseDemoBlobs() {
+  demoBlobUrls.forEach(u => URL.revokeObjectURL(u));
+  demoBlobUrls.clear();
+}
+
 async function loadDemo() {
   const gallery = document.getElementById("gallery");
   const empty = document.getElementById("gallery-empty");
@@ -1144,11 +1218,12 @@ function renderThumbs() {
   strip.innerHTML = "";
   demoItems.forEach((item, i) => {
     const img = document.createElement("img");
-    img.src = item.url;
     img.alt = item.name;
-    img.loading = "lazy";          // the sources are full-resolution
     img.onclick = () => showDemo(i);
     strip.appendChild(img);
+    // Fire and forget: a thumbnail that fails to load leaves an empty box
+    // rather than breaking the gallery.
+    demoBlobUrl(item.url).then(u => { img.src = u; }).catch(() => {});
   });
 }
 
@@ -1159,8 +1234,13 @@ function showDemo(i) {
   const item = demoItems[demoIndex];
 
   const img = document.getElementById("gallery-img");
-  img.src = item.url;
   img.alt = item.name;
+  demoBlobUrl(item.url)
+    .then(u => {
+      // Guard against a slow fetch landing after the user moved on.
+      if (demoItems[demoIndex] && demoItems[demoIndex].url === item.url) img.src = u;
+    })
+    .catch(e => { console.error(e); });
 
   document.getElementById("gallery-name").textContent = item.name;
   document.getElementById("gallery-count").textContent =
@@ -1208,6 +1288,104 @@ document.addEventListener("keydown", e => {
     stepDemo(dx < 0 ? 1 : -1);
   }, { passive: true });
 })();
+
+// ════════════════════════════════════════════════════════════
+//  Modpack download
+// ════════════════════════════════════════════════════════════
+function formatBytes(n) {
+  if (!n && n !== 0) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+async function loadPacks() {
+  const list = document.getElementById("pack-list");
+  const tab = document.getElementById("tab-pack");
+  tab.dataset.packState = "loading";
+  list.innerHTML = "";
+
+  try {
+    const data = await api("GET", "/api/packs");
+
+    if (!data.packs.length) {
+      list.innerHTML = '<div class="gallery-empty">No modpack export here yet. Drop the ' +
+        'CurseForge export .zip into<br><code>' + escapeHtml(data.dir || "the pack directory") +
+        '</code></div>';
+      tab.dataset.packState = "empty";
+      return;
+    }
+
+    data.packs.forEach(p => {
+      const card = document.createElement("div");
+      card.className = "pack-card";
+
+      const meta = [];
+      if (p.minecraft) meta.push("Minecraft " + p.minecraft);
+      if (p.loader) meta.push(p.loader);
+      if (p.modCount !== null) meta.push(p.modCount + " mods");
+      meta.push(formatBytes(p.sizeBytes));
+
+      const left = document.createElement("div");
+      const h = document.createElement("h4");
+      h.textContent = p.packName || p.name;
+      left.appendChild(h);
+
+      const metaRow = document.createElement("div");
+      metaRow.className = "pack-meta";
+      meta.forEach(m => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = m;
+        metaRow.appendChild(chip);
+      });
+      left.appendChild(metaRow);
+
+      if (p.manifestError) {
+        const warn = document.createElement("div");
+        warn.className = "pack-warn";
+        warn.textContent = "Could not read the manifest: " + p.manifestError;
+        left.appendChild(warn);
+      }
+
+      const btn = document.createElement("button");
+      btn.className = "btn btn-green";
+      btn.textContent = "Download";
+      btn.onclick = () => downloadPack(p.name);
+
+      card.appendChild(left);
+      card.appendChild(btn);
+      list.appendChild(card);
+    });
+    tab.dataset.packState = "ready";
+  } catch (e) {
+    list.innerHTML = '<div class="gallery-empty">Could not load modpacks: ' +
+      escapeHtml(e.message) + "</div>";
+    tab.dataset.packState = "error";
+  }
+}
+
+async function downloadPack(name) {
+  // Same problem as the demo images: the download route needs the bearer
+  // token, which a plain link cannot send. Pull it as a blob and hand the
+  // browser a temporary anchor.
+  try {
+    const res = await fetch(API + "/api/packs/" + encodeURIComponent(name) + "/download", {
+      headers: token ? { Authorization: "Bearer " + token } : {}
+    });
+    if (!res.ok) throw new Error("Download failed (" + res.status + ")");
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    alert("Could not download the modpack: " + e.message);
+  }
+}
 
 // ════════════════════════════════════════════════════════════
 //  Backups
@@ -1335,6 +1513,8 @@ const ALL_PERMS = [
   { key: "manage_users", label: "Manage users (admin)" },
   { key: "view_audit",   label: "View audit log" },
   { key: "view_backups", label: "See backup status" },
+  { key: "view_demo",    label: "See the Demo tab" },
+  { key: "download_pack", label: "Download the modpack" },
   { key: "create_backup", label: "Create world backups" }
 ];
 

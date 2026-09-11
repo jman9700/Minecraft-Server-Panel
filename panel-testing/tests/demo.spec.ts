@@ -4,10 +4,12 @@ import { test, expect } from '@playwright/test';
  * The Demo tab: a gallery of screenshots read from `demoDir`
  * (config.json, defaulting to public/demo).
  *
- * Unlike the rest of the panel this is NOT permission-gated -- any signed
- * in account sees it, like the Console tab. Demo material is the least
- * sensitive thing here and the point of it is to be shown. If that ever
- * needs tightening, a `view_demo` permission is the obvious shape.
+ * Gated behind `view_demo`, and the media itself is served through an
+ * authenticated route rather than from public/ -- see modpack.spec.ts for
+ * the tests covering those refusals. Because the media needs a bearer
+ * token, the client fetches each image as a blob and points the <img> at
+ * an object URL, so the rendered src is blob: rather than the /demo-files
+ * path.
  *
  * These run against whatever the deployed panel actually has in its demo
  * directory, which may legitimately be empty. The empty state is asserted
@@ -17,7 +19,17 @@ import { test, expect } from '@playwright/test';
  * Starts authenticated from auth.setup.ts's storageState.
  */
 test.describe('Demo tab', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }) => {
+    // storageState's account needs view_demo for any of this to render.
+    const login = await request.post('/api/login', {
+      data: { username: process.env.PANEL_TEST_USER, password: process.env.PANEL_TEST_PASS },
+    });
+    const perms = (await login.json()).permissions || [];
+    test.skip(
+      !perms.includes('view_demo'),
+      `${process.env.PANEL_TEST_USER} lacks view_demo -- grant it on the panel to cover this`
+    );
+
     await page.goto('/');
     await expect(page.locator('#app-screen')).toBeVisible();
     await page.getByRole('button', { name: 'Demo' }).click();
@@ -27,7 +39,7 @@ test.describe('Demo tab', () => {
     await expect(page.locator('#tab-demo')).not.toHaveAttribute('data-demo-state', 'loading');
   });
 
-  test('is reachable by any signed-in account', async ({ page }) => {
+  test('is reachable with view_demo', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Demo' })).toBeVisible();
     await expect(page.locator('#tab-demo')).toBeVisible();
   });
@@ -38,9 +50,7 @@ test.describe('Demo tab', () => {
     const thumbs = await page.locator('#gallery-thumbs img').all();
     for (const thumb of thumbs) {
       const name = await thumb.getAttribute('alt');
-      const src = await thumb.getAttribute('src');
       expect(name, `${name} should be an image`).toMatch(/\.(png|jpe?g)$/i);
-      expect(src).toMatch(/^\/demo-files\//);
     }
     // README.md sits in that directory by design and must never be listed.
     const names = await page.locator('#gallery-thumbs img').evaluateAll(
@@ -68,10 +78,14 @@ test.describe('Demo tab', () => {
     test.skip(count === 0, 'no demo media on this panel');
 
     // naturalWidth stays 0 for an image that failed to load, so this
-    // catches a broken /demo-files route that a visibility check would not.
+    // catches a broken /demo-files route that a visibility check would not
+    // -- including the token never reaching the authenticated fetch.
     await expect
       .poll(() => page.locator('#gallery-img').evaluate((el: HTMLImageElement) => el.naturalWidth))
       .toBeGreaterThan(0);
+    // Proof the bytes came through the authenticated fetch rather than a
+    // plain <img src> hitting a public path.
+    await expect(page.locator('#gallery-img')).toHaveAttribute('src', /^blob:/);
   });
 
   test('arrows and thumbnails move through the gallery', async ({ page }) => {
