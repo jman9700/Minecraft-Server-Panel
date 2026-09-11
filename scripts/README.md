@@ -1,5 +1,24 @@
 # scripts/
 
+## `panel-start.bat` — start Caddy and the panel by hand
+
+The normal way to bring the panel up on the box. Starts Caddy in its own
+window, then runs `npm start` in the foreground.
+
+It lives here but operates on `mcpanel0.5\minecraft-panel`, resolved
+relative to the script rather than the working directory — so it works
+from a shortcut, from Task Scheduler, or from any prompt. Both processes
+need the panel folder as their working directory (Caddy reads `Caddyfile`
+there; `npm start` needs that `package.json`), so `start /d` sets it for
+the Caddy window and `cd /d` sets it for this one.
+
+If it can't find the panel it says so and exits 1 rather than failing
+somewhere further along.
+
+Note this is *not* what `deploy-poll.ps1` uses to restart the panel — that
+runs `node server.js` directly and leaves Caddy alone, since Caddy is a
+separate long-running process that a redeploy has no reason to bounce.
+
 ## `deploy-poll.ps1` — pull-based deploy for the panel box
 
 Keeps the box's checkout in step with the `deploy` ref on GitHub. Runs
