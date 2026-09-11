@@ -492,6 +492,92 @@
     }
 
     /* ── Audit log ───────────────────────────────── */
+    /* ── Demo gallery ─────────────────────────── */
+    .gallery-stage {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0a0c10;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 320px;
+    }
+    .gallery-img {
+      display: block;
+      max-width: 100%;
+      /* High-res source images: fit the viewport rather than overflow it. */
+      max-height: 62vh;
+      object-fit: contain;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    .gallery-nav {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 42px; height: 42px;
+      display: flex; align-items: center; justify-content: center;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: rgba(12,14,20,0.72);
+      color: var(--text);
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .gallery-nav:hover { background: var(--bg-raised); border-color: var(--border-lit); }
+    .gallery-nav.prev { left: 12px; }
+    .gallery-nav.next { right: 12px; }
+    .gallery-nav[disabled] { opacity: 0.3; cursor: default; }
+
+    .gallery-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 2px 0;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .gallery-name { font-family: 'JetBrains Mono', monospace; overflow-wrap: anywhere; }
+    .gallery-count { flex: none; }
+
+    .gallery-thumbs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 12px 2px 2px;
+    }
+    .gallery-thumbs img {
+      height: 54px; width: 78px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 2px solid transparent;
+      cursor: pointer;
+      opacity: 0.55;
+      transition: all 0.15s;
+      flex: none;
+    }
+    .gallery-thumbs img:hover { opacity: 0.85; }
+    .gallery-thumbs img.active { border-color: var(--accent); opacity: 1; }
+
+    .gallery-empty {
+      padding: 40px 20px;
+      text-align: center;
+      color: var(--text-dim);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 13px;
+    }
+    .gallery-empty code {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+      overflow-wrap: anywhere;
+    }
+
     .audit-log {
       background: #0a0c10;
       border: 1px solid var(--border);
@@ -576,6 +662,7 @@
     <button class="tab-btn" data-tab="files" id="tab-files-btn">Files</button>
     <button class="tab-btn" data-tab="users" id="tab-users-btn">Users</button>
     <button class="tab-btn" data-tab="audit" id="tab-audit-btn">Audit Log</button>
+    <button class="tab-btn" data-tab="demo" id="tab-demo-btn">Demo</button>
   </div>
 
   <!-- ── Console Tab ──────────────────────────── -->
@@ -631,6 +718,29 @@
       <button class="btn" onclick="loadAudit()">Refresh</button>
     </div>
     <div class="audit-log" id="audit-log">Loading...</div>
+  </div>
+
+  <!-- ── Demo Tab ─────────────────────────────── -->
+  <div class="tab-content" id="tab-demo">
+    <div class="section-header">
+      <h3>Demo</h3>
+      <button class="btn" onclick="loadDemo()" style="font-size:12px; padding:4px 12px;">Refresh</button>
+    </div>
+
+    <div class="gallery" id="gallery" style="display:none">
+      <div class="gallery-stage">
+        <button class="gallery-nav prev" id="gallery-prev" onclick="stepDemo(-1)" aria-label="Previous">&#10094;</button>
+        <img class="gallery-img" id="gallery-img" alt="">
+        <button class="gallery-nav next" id="gallery-next" onclick="stepDemo(1)" aria-label="Next">&#10095;</button>
+      </div>
+      <div class="gallery-bar">
+        <span class="gallery-name" id="gallery-name"></span>
+        <span class="gallery-count" id="gallery-count"></span>
+      </div>
+      <div class="gallery-thumbs" id="gallery-thumbs"></div>
+    </div>
+
+    <div class="gallery-empty" id="gallery-empty">Loading demo media...</div>
   </div>
 </div>
 
@@ -701,6 +811,13 @@ async function doLogin() {
 function resetAppUI() {
   document.getElementById("user-grid").innerHTML = "";
   document.getElementById("backup-bar").style.display = "none";
+  document.getElementById("gallery").style.display = "none";
+  document.getElementById("gallery-thumbs").innerHTML = "";
+  document.getElementById("gallery-img").removeAttribute("src");
+  document.getElementById("gallery-empty").style.display = "";
+  document.getElementById("gallery-empty").textContent = "Loading demo media...";
+  demoItems = [];
+  demoIndex = 0;
   document.getElementById("backup-btn").style.display = "none";
   document.getElementById("backup-status").textContent = "Checking backups...";
   document.getElementById("console-output").innerHTML = "";
@@ -794,6 +911,7 @@ function setupTabs() {
 
       if (btn.dataset.tab === "users" && hasPerm("manage_users")) loadUsers();
       if (btn.dataset.tab === "audit" && hasPerm("view_audit"))   loadAudit();
+      if (btn.dataset.tab === "demo") loadDemo();
       if (btn.dataset.tab === "files") {
         if (hasPerm("browse_files")) loadFiles(".");
         if (hasPerm("view_backups")) loadBackups();
@@ -973,6 +1091,123 @@ function renderDirectory(data) {
     tbody.appendChild(tr);
   });
 }
+
+// ════════════════════════════════════════════════════════════
+//  Demo gallery
+// ════════════════════════════════════════════════════════════
+// Roadmap: items already carry a `type` ("image" today, "video" next),
+// so adding video is a matter of branching the stage render rather than
+// reshaping the data.
+let demoItems = [];
+let demoIndex = 0;
+
+async function loadDemo() {
+  const gallery = document.getElementById("gallery");
+  const empty = document.getElementById("gallery-empty");
+  // Settles to ready | empty | error. Saves anything watching the tab
+  // (tests included) from guessing whether the fetch has come back.
+  const tab = document.getElementById("tab-demo");
+  tab.dataset.demoState = "loading";
+
+  try {
+    const data = await api("GET", "/api/demo/media");
+    demoItems = data.items || [];
+
+    if (!demoItems.length) {
+      gallery.style.display = "none";
+      empty.style.display = "";
+      empty.innerHTML = "No demo media yet. Drop .png or .jpg files into<br><code>" +
+        escapeHtml(data.dir || "the demo directory") + "</code>";
+      tab.dataset.demoState = "empty";
+      return;
+    }
+
+    // Clear the placeholder as well as hiding it -- stale text in a hidden
+    // node still reads back to anything inspecting the DOM.
+    empty.textContent = "";
+    empty.style.display = "none";
+    gallery.style.display = "";
+    tab.dataset.demoState = "ready";
+    demoIndex = 0;
+    renderThumbs();
+    showDemo(0);
+  } catch (e) {
+    gallery.style.display = "none";
+    empty.style.display = "";
+    empty.textContent = "Could not load demo media: " + e.message;
+    tab.dataset.demoState = "error";
+  }
+}
+
+function renderThumbs() {
+  const strip = document.getElementById("gallery-thumbs");
+  strip.innerHTML = "";
+  demoItems.forEach((item, i) => {
+    const img = document.createElement("img");
+    img.src = item.url;
+    img.alt = item.name;
+    img.loading = "lazy";          // the sources are full-resolution
+    img.onclick = () => showDemo(i);
+    strip.appendChild(img);
+  });
+}
+
+function showDemo(i) {
+  if (!demoItems.length) return;
+  // Wrap around, so the arrows never dead-end on a short gallery.
+  demoIndex = (i + demoItems.length) % demoItems.length;
+  const item = demoItems[demoIndex];
+
+  const img = document.getElementById("gallery-img");
+  img.src = item.url;
+  img.alt = item.name;
+
+  document.getElementById("gallery-name").textContent = item.name;
+  document.getElementById("gallery-count").textContent =
+    (demoIndex + 1) + " / " + demoItems.length;
+
+  const single = demoItems.length < 2;
+  document.getElementById("gallery-prev").disabled = single;
+  document.getElementById("gallery-next").disabled = single;
+
+  document.querySelectorAll("#gallery-thumbs img").forEach((t, n) => {
+    t.classList.toggle("active", n === demoIndex);
+  });
+  const active = document.querySelector("#gallery-thumbs img.active");
+  if (active) active.scrollIntoView({ block: "nearest", inline: "nearest" });
+}
+
+function stepDemo(delta) {
+  showDemo(demoIndex + delta);
+}
+
+// Arrow keys, but only while the Demo tab is the visible one -- otherwise
+// they would hijack arrow presses meant for the console input.
+document.addEventListener("keydown", e => {
+  const demoVisible = document.getElementById("tab-demo").classList.contains("active");
+  if (!demoVisible || !demoItems.length) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea") return;
+  if (e.key === "ArrowLeft") { stepDemo(-1); e.preventDefault(); }
+  if (e.key === "ArrowRight") { stepDemo(1); e.preventDefault(); }
+});
+
+// Swipe. Tracked on the stage rather than the image so a swipe that
+// starts on the letterboxing still counts.
+(function wireSwipe() {
+  const stage = document.querySelector(".gallery-stage");
+  if (!stage) return;
+  let startX = null;
+  const SWIPE_MIN_PX = 40;   // below this it was a tap, not a swipe
+  stage.addEventListener("touchstart", e => { startX = e.changedTouches[0].clientX; }, { passive: true });
+  stage.addEventListener("touchend", e => {
+    if (startX === null) return;
+    const dx = e.changedTouches[0].clientX - startX;
+    startX = null;
+    if (Math.abs(dx) < SWIPE_MIN_PX) return;
+    stepDemo(dx < 0 ? 1 : -1);
+  }, { passive: true });
+})();
 
 // ════════════════════════════════════════════════════════════
 //  Backups

@@ -24,6 +24,7 @@ const DEFAULT_CONFIG = {
   tokenExpiryHours: 8,
   maxLoginAttempts: 5,
   lockoutMinutes: 15,
+  demoDir: "",               // where demo media lives; blank = public/demo
   loginRateMax: 10,          // max /api/login requests per IP per window
   loginRateWindowMs: 60000
 };
@@ -571,6 +572,69 @@ app.post("/api/backups", authMiddleware, requirePermission("create_backup"), asy
     res.status(500).json({ error: e.message });
   } finally {
     backupInProgress = false;
+  }
+});
+
+// ── Demo media ──────────────────────────────────────────────
+//
+// Backs the Demo tab: a gallery of screenshots today, video next, and
+// eventually a playable demo. Media is read from `demoDir` (config.json),
+// defaulting to public/demo.
+//
+// Served by express.static rather than streamed through a handler, which
+// gets range requests for free -- that matters little for stills but is
+// what will make video seeking work without rewriting this.
+//
+// Note this content is reachable WITHOUT logging in, same as everything
+// else under public/. That is the right default for demo material (an
+// <img> cannot send an Authorization header anyway), but it does mean
+// anything dropped in here is public to whoever can reach the panel.
+const DEMO_EXTENSIONS = {
+  ".png": "image",
+  ".jpg": "image",
+  ".jpeg": "image"
+  // Roadmap: ".mp4": "video", ".webm": "video" -- express.static already
+  // handles the range requests those need.
+};
+
+const DEMO_DIR = config.demoDir
+  ? path.resolve(config.demoDir)
+  : path.join(__dirname, "public", "demo");
+
+function demoType(name) {
+  return DEMO_EXTENSIONS[path.extname(name).toLowerCase()] || null;
+}
+
+// Only hand out recognised media types. If demoDir is ever pointed
+// somewhere with other files in it, they stay unreachable.
+app.use("/demo-files", (req, res, next) => {
+  if (!demoType(req.path)) return res.status(404).end();
+  next();
+}, express.static(DEMO_DIR, { fallthrough: false }));
+
+app.get("/api/demo/media", authMiddleware, (req, res) => {
+  try {
+    if (!fs.existsSync(DEMO_DIR)) return res.json({ items: [], dir: DEMO_DIR });
+
+    const items = fs.readdirSync(DEMO_DIR, { withFileTypes: true })
+      .filter(e => e.isFile() && demoType(e.name))
+      .map(e => {
+        const stat = fs.statSync(path.join(DEMO_DIR, e.name));
+        return {
+          name: e.name,
+          type: demoType(e.name),
+          url: "/demo-files/" + encodeURIComponent(e.name),
+          sizeBytes: stat.size,
+          modified: stat.mtime.toISOString()
+        };
+      })
+      // Plain name order, so a numeric prefix is all you need to control
+      // the sequence of a gallery.
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+    res.json({ items, dir: DEMO_DIR });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
