@@ -34,7 +34,7 @@ function panelFingerprint(panelDir) {
   return hash.digest("hex").slice(0, 12);
 }
 
-const DEFAULT_PANEL_DIR = path.resolve(__dirname, "..", "mcpanel0.5", "minecraft-panel");
+const DEFAULT_PANEL_DIR = path.resolve(__dirname, "..", "minecraft-panel");
 
 module.exports = { panelFingerprint, PANEL_SOURCE_FILES, DEFAULT_PANEL_DIR };
 

@@ -10,5 +10,5 @@ REM absolute path, so it would break on any checkout that is not in the
 REM exact folder it was created for. This resolves relatively and works
 REM in every clone.
 
-call "%~dp0..\mcpanel0.5\minecraft-panel\panel-start.bat" %*
+call "%~dp0..\minecraft-panel\panel-start.bat" %*
 exit /b %ERRORLEVEL%

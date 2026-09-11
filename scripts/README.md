@@ -3,7 +3,7 @@
 ## `panel-start.bat` — shim
 
 A one-line forwarder. The real script lives beside the panel's
-`package.json` at `mcpanel0.5/minecraft-panel/panel-start.bat`, because
+`package.json` at `minecraft-panel/panel-start.bat`, because
 that is where `npm` has to run; this just lets you launch from here too.
 
 It is a `.bat` rather than a Windows `.lnk` on purpose — a shortcut
@@ -13,7 +13,7 @@ the exact folder it was made for.
 Either entry point works, from any working directory:
 
 ```
-mcpanel0.5\minecraft-panel\panel-start.bat    (the real one)
+minecraft-panel\panel-start.bat    (the real one)
 scripts\panel-start.bat                        (forwards to it)
 ```
 

@@ -31,7 +31,7 @@ const {
   PANEL_SOURCE_FILES,
 } = require(path.resolve(__dirname, '..', '..', 'scripts', 'panel-fingerprint.js'));
 
-const PANEL_ROOT = path.resolve(__dirname, '..', '..', 'mcpanel0.5', 'minecraft-panel');
+const PANEL_ROOT = path.resolve(__dirname, '..', '..', 'minecraft-panel');
 
 const USER = process.env.PANEL_TEST_USER;
 const PASS = process.env.PANEL_TEST_PASS;
@@ -66,7 +66,7 @@ setup('panel matches this checkout', async ({ request }) => {
   if (res.status() === 404) {
     throw new Error(
       'The panel has no /api/version endpoint, so it predates this check entirely. ' +
-        'Deploy mcpanel0.5/minecraft-panel/server.js to the box and restart the panel ' +
+        'Deploy minecraft-panel/server.js to the box and restart the panel ' +
         'process (server.js is only read at boot -- copying the file is not enough).'
     );
   }
