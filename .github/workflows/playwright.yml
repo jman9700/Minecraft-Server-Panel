@@ -45,12 +45,23 @@ jobs:
   stage:
     name: Stage onto the box
     runs-on: ubuntu-latest
-    # Fork PRs get no secrets and a read-only token, so they cannot stage
-    # onto the box -- which is exactly what we want. Skip them explicitly
-    # rather than failing on a permission error.
+    # Two guards:
+    #
+    # 1. Fork PRs get no secrets and a read-only token, so they cannot
+    #    stage onto the box -- which is exactly what we want. Skip them
+    #    explicitly rather than failing on a permission error.
+    #
+    # 2. A merge fires `pull_request: closed` AND `push: release` at the
+    #    same instant. Both contend for the `panel-box` concurrency group
+    #    and one gets cancelled while pending -- which cost us a
+    #    post-merge test run. The `push` trigger owns merges (it also runs
+    #    the suite afterwards), so a merged close does nothing here.
+    #    `closed` is left for ABANDONED PRs, where rolling the box back
+    #    off unreviewed code is the whole point.
     if: >-
       github.event_name == 'push' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       !(github.event.action == 'closed' && github.event.pull_request.merged))
     outputs:
       sha: ${{ steps.pick.outputs.sha }}
       testing: ${{ steps.pick.outputs.testing }}
@@ -67,9 +78,10 @@ jobs:
             testing=true
             echo "Merge landed on release -- returning the box to the release line."
           elif [ "${{ github.event.action }}" = "closed" ]; then
+            # Abandoned PR only -- merges are handled by the push trigger.
             sha="$(git rev-parse origin/${{ github.base_ref }})"
             testing=false
-            echo "PR closed -- returning the box to ${{ github.base_ref }}."
+            echo "PR closed without merging -- returning the box to ${{ github.base_ref }}."
           else
             sha="${{ github.event.pull_request.head.sha }}"
             testing=true
