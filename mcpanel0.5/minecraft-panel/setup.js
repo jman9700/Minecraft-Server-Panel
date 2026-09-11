@@ -112,7 +112,7 @@ function askHidden(question) {
   users.push({
     username,
     passwordHash: hash,
-    permissions: ["start", "restart", "kill", "browse_files", "console", "manage_users", "view_audit"],
+    permissions: ["start", "restart", "kill", "browse_files", "console", "manage_users", "view_audit", "view_backups", "create_backup"],
     disabled: false,
     createdAt: new Date().toISOString()
   });
