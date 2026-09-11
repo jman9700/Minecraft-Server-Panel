@@ -15,11 +15,11 @@ loads thumbnails lazily.
 
 ## Two things worth knowing
 
-**This directory is public.** It sits under `public/`, which the panel
-serves without authentication — the same way it serves `index.html`.
-Anyone who can reach the panel URL can fetch these images directly. That
-is the right default for demo material, but don't put anything private
-here.
+**This directory is not public.** It used to sit under `public/`, which
+the panel serves without authentication — meaning anyone with a URL could
+fetch these images without an account. It now lives outside `public/` and
+is served through an authenticated route behind the `view_demo`
+permission.
 
 **These files are not gitignored.** Committing them means the demo works
 on a fresh deploy; leaving them uncommitted keeps the repo small and they
