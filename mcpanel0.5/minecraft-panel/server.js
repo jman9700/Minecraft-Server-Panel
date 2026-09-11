@@ -7,6 +7,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const zlib = require("zlib");
 const { spawn, execSync } = require("child_process");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
@@ -24,6 +25,8 @@ const DEFAULT_CONFIG = {
   tokenExpiryHours: 8,
   maxLoginAttempts: 5,
   lockoutMinutes: 15,
+  demoDir: "",               // where demo media lives; blank = ./demo
+  packDir: "",               // where modpack exports live; blank = ./packs
   loginRateMax: 10,          // max /api/login requests per IP per window
   loginRateWindowMs: 60000
 };
@@ -429,6 +432,410 @@ app.post("/api/server/command", authMiddleware, requirePermission("console"), (r
   }
 });
 
+// ── World backups ───────────────────────────────────────────
+//
+// Copies <serverDir>/world into <panelDir>/backups/. Three rules, all of
+// them load-bearing:
+//
+//   1. The world directory is READ-ONLY to this code. Nothing here ever
+//      writes, renames or deletes inside it -- fs.cp only reads the
+//      source. There is deliberately no restore endpoint; rolling a
+//      backup back is a manual job for now.
+//
+//   2. A backup only runs with the Minecraft server fully stopped.
+//      Copying a live world gives you a torn snapshot: region files are
+//      mid-write and the result can be silently corrupt.
+//
+//   3. One backup at a time, and a copy in flight is never mistaken for
+//      a finished one -- it lands in an ".incomplete-" directory and is
+//      only renamed into place once the copy returns. A crash mid-copy
+//      leaves obvious litter rather than a plausible-looking bad backup.
+//
+// backups/ is gitignored, which is also what makes it a useful signal:
+// it can only exist on a machine where a backup has actually run.
+const BACKUP_DIR = path.join(__dirname, "backups");
+const BACKUP_PREFIX = "world-";
+const BACKUP_INCOMPLETE_PREFIX = ".incomplete-";
+const BACKUP_MANIFEST = "backup.json";
+
+let backupInProgress = false;
+
+function worldDir() {
+  return path.join(path.resolve(config.serverDir), "world");
+}
+
+// Guard against a config where the panel lives inside the server folder,
+// which would have us copying the world into itself, forever.
+function assertBackupDirIsSafe() {
+  const world = path.resolve(worldDir());
+  const dest = path.resolve(BACKUP_DIR);
+  if (dest === world || dest.startsWith(world + path.sep)) {
+    throw new Error(
+      "Refusing to back up: the backup directory is inside the world directory"
+    );
+  }
+}
+
+// Why a backup can or cannot run right now. Shared by the GET (so the UI
+// can explain itself) and the POST (which enforces it).
+function backupReadiness() {
+  if (backupInProgress) return { ok: false, reason: "A backup is already running" };
+  if (mcProcess || mcStatus !== "stopped") {
+    return {
+      ok: false,
+      reason: `The Minecraft server must be stopped first (it is "${mcStatus}")`
+    };
+  }
+  if (!fs.existsSync(worldDir())) {
+    return { ok: false, reason: `No world directory found at ${worldDir()}` };
+  }
+  return { ok: true, reason: "" };
+}
+
+function listBackups() {
+  if (!fs.existsSync(BACKUP_DIR)) return [];
+  return fs.readdirSync(BACKUP_DIR, { withFileTypes: true })
+    .filter(e => e.isDirectory() && e.name.startsWith(BACKUP_PREFIX))
+    .map(e => {
+      const dir = path.join(BACKUP_DIR, e.name);
+      let createdAt = null;
+      try {
+        createdAt = JSON.parse(fs.readFileSync(path.join(dir, BACKUP_MANIFEST), "utf-8")).createdAt;
+      } catch {
+        // Manifest missing or unreadable -- fall back to the directory's
+        // own timestamp so an older backup still reports an age.
+        try { createdAt = fs.statSync(dir).mtime.toISOString(); } catch { /* ignore */ }
+      }
+      return { name: e.name, createdAt };
+    })
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+app.get("/api/backups", authMiddleware, requirePermission("view_backups"), (req, res) => {
+  try {
+    const backups = listBackups();
+    res.json({
+      backups,
+      latest: backups[0] || null,
+      inProgress: backupInProgress,
+      serverStatus: mcStatus,
+      canCreate: backupReadiness()
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/backups", authMiddleware, requirePermission("create_backup"), async (req, res) => {
+  const ready = backupReadiness();
+  if (!ready.ok) {
+    audit(req.user.username, "BACKUP_REFUSED", ready.reason);
+    return res.status(409).json({ error: ready.reason });
+  }
+
+  try {
+    assertBackupDirIsSafe();
+  } catch (e) {
+    audit(req.user.username, "BACKUP_REFUSED", e.message);
+    return res.status(409).json({ error: e.message });
+  }
+
+  // Claim the lock before the first await so two requests cannot both
+  // pass the readiness check above.
+  backupInProgress = true;
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const finalName = BACKUP_PREFIX + stamp;
+  const tempDir = path.join(BACKUP_DIR, BACKUP_INCOMPLETE_PREFIX + stamp);
+  const finalDir = path.join(BACKUP_DIR, finalName);
+
+  try {
+    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+
+    // Re-check now that we hold the lock: the server could have been
+    // started in the gap, and a torn world copy is the thing we are here
+    // to prevent.
+    if (mcProcess || mcStatus !== "stopped") {
+      throw new Error("The Minecraft server started while the backup was queued");
+    }
+
+    await fs.promises.cp(worldDir(), tempDir, { recursive: true, force: false, errorOnExist: false });
+    fs.writeFileSync(
+      path.join(tempDir, BACKUP_MANIFEST),
+      JSON.stringify({ createdAt: new Date().toISOString(), by: req.user.username, source: worldDir() }, null, 2)
+    );
+    fs.renameSync(tempDir, finalDir);
+
+    audit(req.user.username, "BACKUP_CREATED", finalName);
+    res.json({ ok: true, name: finalName });
+  } catch (e) {
+    // Leave nothing that could pass for a real backup.
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    audit(req.user.username, "BACKUP_FAILED", e.message);
+    res.status(500).json({ error: e.message });
+  } finally {
+    backupInProgress = false;
+  }
+});
+
+// ── Modpack downloads ───────────────────────────────────────
+//
+// Hosts the CurseForge modpack export so players can grab the exact
+// profile the server runs. The export is manifest-only -- a list of
+// project/file IDs plus config overrides, no mod jars -- so there is
+// nothing here to redistribute improperly; the CurseForge client
+// resolves the IDs itself.
+//
+// Unlike demo media this is NOT under public/. It is served through an
+// authenticated route behind `download_pack`, so getting the pack means
+// having a panel account.
+//
+// The pack details shown in the UI come from parsing manifest.json out
+// of the zip. That is done with a minimal reader below rather than a zip
+// dependency on purpose: the deploy poller does `git reset --hard` and
+// restarts, but never runs `npm install`, so a new dependency would take
+// the panel down until someone installed it by hand.
+const PACK_DIR = config.packDir
+  ? path.resolve(config.packDir)
+  : path.join(__dirname, "packs");
+
+// Minimal zip reader: pulls one named entry out of an archive using only
+// zlib. Enough for manifest.json; not a general-purpose implementation.
+function readZipEntry(zipPath, wantedName) {
+  const buf = fs.readFileSync(zipPath);
+
+  // End of Central Directory: fixed 22-byte record, possibly followed by
+  // a comment, so scan backwards for the signature.
+  const EOCD_SIG = 0x06054b50;
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 66000; i--) {
+    if (buf.readUInt32LE(i) === EOCD_SIG) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Not a zip file (no end-of-central-directory record)");
+
+  const entryCount = buf.readUInt16LE(eocd + 10);
+  let p = buf.readUInt32LE(eocd + 16);
+
+  for (let n = 0; n < entryCount; n++) {
+    if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error("Corrupt central directory");
+    const method    = buf.readUInt16LE(p + 10);
+    const compSize  = buf.readUInt32LE(p + 20);
+    const nameLen   = buf.readUInt16LE(p + 28);
+    const extraLen  = buf.readUInt16LE(p + 30);
+    const commentLen= buf.readUInt16LE(p + 32);
+    const localOff  = buf.readUInt32LE(p + 42);
+    const name      = buf.toString("utf8", p + 46, p + 46 + nameLen);
+
+    if (name === wantedName) {
+      // The local header repeats name/extra lengths and they can differ
+      // from the central directory's, so read them from the local header.
+      if (buf.readUInt32LE(localOff) !== 0x04034b50) throw new Error("Corrupt local header");
+      const lNameLen  = buf.readUInt16LE(localOff + 26);
+      const lExtraLen = buf.readUInt16LE(localOff + 28);
+      const start = localOff + 30 + lNameLen + lExtraLen;
+      const data = buf.subarray(start, start + compSize);
+      if (method === 0) return data;                      // stored
+      if (method === 8) return zlib.inflateRawSync(data); // deflate
+      throw new Error(`Unsupported zip compression method ${method}`);
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return null;
+}
+
+// Drift: is this pack still an accurate snapshot of what the server runs?
+//
+// The realistic failure is mundane -- you add or update a mod, forget to
+// re-export, and players build a profile that will not connect. So the
+// signal is timestamps: any jar in the server's mods/ modified after the
+// pack was exported means the pack is behind.
+//
+// Deliberately NOT based on comparing mod lists. The pack legitimately
+// contains client-only mods (shaders, Distant Horizons) that never appear
+// server-side, and the server can carry server-only mods absent from the
+// pack, so counts differ in normal operation and name-matching jar files
+// to CurseForge display names is guesswork. Counts are reported as
+// context, never as the verdict.
+const MODS_DIR_NAME = "mods";
+
+function scanServerMods() {
+  const dir = path.join(path.resolve(config.serverDir), MODS_DIR_NAME);
+  if (!fs.existsSync(dir)) {
+    return { available: false, reason: `No mods directory at ${dir}`, dir };
+  }
+  try {
+    const jars = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => e.isFile() && path.extname(e.name).toLowerCase() === ".jar")
+      .map(e => {
+        const stat = fs.statSync(path.join(dir, e.name));
+        return { name: e.name, modified: stat.mtime };
+      });
+    return { available: true, dir, jars };
+  } catch (e) {
+    return { available: false, reason: e.message, dir };
+  }
+}
+
+function describeDrift(packModifiedMs, mods) {
+  if (!mods.available) return { checked: false, reason: mods.reason };
+
+  const newer = mods.jars
+    .filter(j => j.modified.getTime() > packModifiedMs)
+    .sort((a, b) => b.modified - a.modified);
+
+  const drift = {
+    checked: true,
+    serverModCount: mods.jars.length,
+    changedSinceExport: newer.length,
+    // Enough to act on without shipping the whole directory listing.
+    changedFiles: newer.slice(0, 10).map(j => j.name),
+    stale: newer.length > 0
+  };
+  drift.message = drift.stale
+    ? `${newer.length} mod file${newer.length === 1 ? "" : "s"} changed after this pack was exported`
+    : "No mod files have changed since this pack was exported";
+  return drift;
+}
+
+function describePack(file, mods) {
+  const full = path.join(PACK_DIR, file);
+  const stat = fs.statSync(full);
+  const info = {
+    name: file,
+    sizeBytes: stat.size,
+    modified: stat.mtime.toISOString(),
+    packName: null, minecraft: null, loader: null, modCount: null, manifestError: null
+  };
+  try {
+    const raw = readZipEntry(full, "manifest.json");
+    if (!raw) {
+      info.manifestError = "No manifest.json -- is this a CurseForge export?";
+      return info;
+    }
+    const m = JSON.parse(raw.toString("utf-8"));
+    info.packName = m.name || null;
+    info.minecraft = m.minecraft && m.minecraft.version ? m.minecraft.version : null;
+    const primary = (m.minecraft && m.minecraft.modLoaders || []).find(l => l.primary)
+      || (m.minecraft && m.minecraft.modLoaders || [])[0];
+    info.loader = primary ? primary.id : null;
+    info.modCount = Array.isArray(m.files) ? m.files.length : null;
+  } catch (e) {
+    info.manifestError = e.message;
+  }
+  info.drift = describeDrift(stat.mtime.getTime(), mods);
+  return info;
+}
+
+app.get("/api/packs", authMiddleware, requirePermission("download_pack"), (req, res) => {
+  try {
+    if (!fs.existsSync(PACK_DIR)) return res.json({ packs: [], dir: PACK_DIR });
+    // Scanned once and shared: every pack compares against the same mods/.
+    const mods = scanServerMods();
+    const packs = fs.readdirSync(PACK_DIR, { withFileTypes: true })
+      .filter(e => e.isFile() && path.extname(e.name).toLowerCase() === ".zip")
+      .map(e => describePack(e.name, mods))
+      .sort((a, b) => b.modified.localeCompare(a.modified));
+    res.json({ packs, dir: PACK_DIR });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/api/packs/:name/download", authMiddleware, requirePermission("download_pack"), (req, res) => {
+  // basename strips any directory part, so ".." and absolute paths cannot
+  // escape PACK_DIR. The extension check keeps this route to zips only.
+  const name = path.basename(req.params.name);
+  if (path.extname(name).toLowerCase() !== ".zip") {
+    return res.status(400).json({ error: "Not a modpack file" });
+  }
+  const full = path.join(PACK_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: "Modpack not found" });
+
+  audit(req.user.username, "PACK_DOWNLOADED", name);
+  res.download(full, name);
+});
+
+// ── Demo media ──────────────────────────────────────────────
+//
+// Backs the Demo tab: a gallery of screenshots today, video next, and
+// eventually a playable demo. Media is read from `demoDir` (config.json),
+// defaulting to public/demo.
+//
+// Deliberately NOT under public/. It used to be, which made the files
+// readable by anyone who knew a URL -- a permission on the tab would not
+// have changed that, since public/ is served unauthenticated. Media now
+// goes through an authenticated route behind `view_demo`.
+//
+// The cost is that <img src> cannot send an Authorization header, so the
+// client fetches each image as a blob and points the tag at an object
+// URL. Range requests go with it, which will matter when video lands --
+// at that point this route needs to grow Range support rather than
+// getting it free from express.static.
+const DEMO_EXTENSIONS = {
+  ".png": "image",
+  ".jpg": "image",
+  ".jpeg": "image"
+  // Roadmap: ".mp4": "video", ".webm": "video" -- express.static already
+  // handles the range requests those need.
+};
+
+const DEMO_DIR = config.demoDir
+  ? path.resolve(config.demoDir)
+  : path.join(__dirname, "demo");
+
+function demoType(name) {
+  return DEMO_EXTENSIONS[path.extname(name).toLowerCase()] || null;
+}
+
+// Only recognised media types are reachable, so pointing demoDir at a
+// directory with other files in it does not expose them. basename strips
+// any directory part, so ".." cannot escape DEMO_DIR.
+app.get("/demo-files/:name", authMiddleware, requirePermission("view_demo"), (req, res) => {
+  const name = path.basename(req.params.name);
+  if (!demoType(name)) return res.status(404).json({ error: "Not a demo media file" });
+  const full = path.join(DEMO_DIR, name);
+  if (!fs.existsSync(full)) return res.status(404).json({ error: "Not found" });
+  res.sendFile(full);
+});
+
+app.get("/api/demo/media", authMiddleware, requirePermission("view_demo"), (req, res) => {
+  try {
+    if (!fs.existsSync(DEMO_DIR)) return res.json({ items: [], dir: DEMO_DIR });
+
+    const items = fs.readdirSync(DEMO_DIR, { withFileTypes: true })
+      .filter(e => e.isFile() && demoType(e.name))
+      .map(e => {
+        const stat = fs.statSync(path.join(DEMO_DIR, e.name));
+        return {
+          name: e.name,
+          type: demoType(e.name),
+          url: "/demo-files/" + encodeURIComponent(e.name),
+          sizeBytes: stat.size,
+          modified: stat.mtime.toISOString()
+        };
+      })
+      // Plain name order, so a numeric prefix is all you need to control
+      // the sequence of a gallery.
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+    res.json({ items, dir: DEMO_DIR });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Permissions ─────────────────────────────────────────────
+// One list, used by both user-management routes. It used to be declared
+// inline at each of them, which is exactly how a new permission ends up
+// half-added.
+const VALID_PERMS = [
+  "start", "restart", "kill", "browse_files", "console",
+  "manage_users", "view_audit",
+  "view_backups",   // see the backup indicator
+  "download_pack",  // list and download the CurseForge modpack export
+  "view_demo",      // see the Demo tab
+  "create_backup"   // run a backup
+];
+
 // ── File browser routes ─────────────────────────────────────
 function safePath(requestedPath) {
   // Resolve and ensure the path stays inside serverDir
@@ -521,8 +928,7 @@ app.post("/api/users", authMiddleware, requirePermission("manage_users"), async 
     return res.status(409).json({ error: "Username already exists" });
   }
 
-  const validPerms = ["start", "restart", "kill", "browse_files", "console", "manage_users", "view_audit"];
-  const perms = (permissions || []).filter(p => validPerms.includes(p));
+  const perms = (permissions || []).filter(p => VALID_PERMS.includes(p));
 
   const hash = await bcrypt.hash(password, SALT_ROUNDS);
   users.push({
@@ -543,10 +949,9 @@ app.put("/api/users/:username", authMiddleware, requirePermission("manage_users"
   if (idx === -1) return res.status(404).json({ error: "User not found" });
 
   const { permissions, disabled, password } = req.body;
-  const validPerms = ["start", "restart", "kill", "browse_files", "console", "manage_users", "view_audit"];
 
   if (permissions !== undefined) {
-    users[idx].permissions = permissions.filter(p => validPerms.includes(p));
+    users[idx].permissions = permissions.filter(p => VALID_PERMS.includes(p));
   }
   if (disabled !== undefined) {
     users[idx].disabled = !!disabled;
