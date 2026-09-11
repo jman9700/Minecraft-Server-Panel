@@ -141,6 +141,60 @@ test.describe('Modpack download', () => {
     expect(traversal.status(), 'traversal must not resolve').toBe(400);
   });
 
+  test('drift is reported against the server mods directory', async ({ request }) => {
+    const s = await signIn(request, USER, PASS);
+    test.skip(!s.permissions.includes('download_pack'), `${USER} lacks download_pack`);
+
+    const { packs } = await (await request.get('/api/packs', { headers: auth(s) })).json();
+    test.skip(packs.length === 0, 'no modpack export on this panel');
+
+    const drift = packs[0].drift;
+    expect(drift, 'every pack should carry a drift verdict').toBeTruthy();
+
+    if (!drift.checked) {
+      // Can't see mods/ -- must say so rather than implying the pack is fine.
+      expect(drift.reason).toBeTruthy();
+      expect(drift.stale).toBeUndefined();
+      return;
+    }
+
+    expect(typeof drift.stale).toBe('boolean');
+    expect(drift.serverModCount).toBeGreaterThanOrEqual(0);
+    expect(drift.message).toBeTruthy();
+
+    // Staleness comes from timestamps, never from comparing counts: a pack
+    // carries client-only mods the server never has, so the two differing
+    // must not on its own mark it stale.
+    if (drift.changedSinceExport === 0) {
+      expect(drift.stale, 'nothing changed since export, so not stale').toBe(false);
+    } else {
+      expect(drift.stale).toBe(true);
+      expect(drift.changedFiles.length).toBeGreaterThan(0);
+      for (const f of drift.changedFiles) expect(f).toMatch(/\.jar$/i);
+    }
+  });
+
+  test('the tab shows a drift verdict beside the pack', async ({ page, request }) => {
+    const s = await signIn(request, USER, PASS);
+    test.skip(!s.permissions.includes('download_pack'), `${USER} lacks download_pack`);
+
+    await page.goto('/login');
+    await page.locator('#login-user').fill(USER);
+    await page.locator('#login-pass').fill(PASS);
+    await page.getByRole('button', { name: 'Sign In' }).click();
+    await expect(page.locator('#app-screen')).toBeVisible();
+    await page.getByRole('button', { name: 'Modpack' }).click();
+    await expect(page.locator('#tab-pack')).not.toHaveAttribute('data-pack-state', 'loading');
+
+    const state = await page.locator('#tab-pack').getAttribute('data-pack-state');
+    test.skip(state !== 'ready', 'no modpack export on this panel');
+
+    const bar = page.locator('.drift-bar').first();
+    await expect(bar).toBeVisible();
+    // Whatever the verdict, it must be an actual verdict -- never blank.
+    await expect(bar).not.toHaveText('');
+  });
+
   test('the Modpack tab shows the pack with details from the manifest', async ({ page, request }) => {
     const s = await signIn(request, USER, PASS);
     test.skip(!s.permissions.includes('download_pack'), `${USER} lacks download_pack`);

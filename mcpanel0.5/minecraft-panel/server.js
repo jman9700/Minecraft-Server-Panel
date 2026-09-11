@@ -642,7 +642,61 @@ function readZipEntry(zipPath, wantedName) {
   return null;
 }
 
-function describePack(file) {
+// Drift: is this pack still an accurate snapshot of what the server runs?
+//
+// The realistic failure is mundane -- you add or update a mod, forget to
+// re-export, and players build a profile that will not connect. So the
+// signal is timestamps: any jar in the server's mods/ modified after the
+// pack was exported means the pack is behind.
+//
+// Deliberately NOT based on comparing mod lists. The pack legitimately
+// contains client-only mods (shaders, Distant Horizons) that never appear
+// server-side, and the server can carry server-only mods absent from the
+// pack, so counts differ in normal operation and name-matching jar files
+// to CurseForge display names is guesswork. Counts are reported as
+// context, never as the verdict.
+const MODS_DIR_NAME = "mods";
+
+function scanServerMods() {
+  const dir = path.join(path.resolve(config.serverDir), MODS_DIR_NAME);
+  if (!fs.existsSync(dir)) {
+    return { available: false, reason: `No mods directory at ${dir}`, dir };
+  }
+  try {
+    const jars = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(e => e.isFile() && path.extname(e.name).toLowerCase() === ".jar")
+      .map(e => {
+        const stat = fs.statSync(path.join(dir, e.name));
+        return { name: e.name, modified: stat.mtime };
+      });
+    return { available: true, dir, jars };
+  } catch (e) {
+    return { available: false, reason: e.message, dir };
+  }
+}
+
+function describeDrift(packModifiedMs, mods) {
+  if (!mods.available) return { checked: false, reason: mods.reason };
+
+  const newer = mods.jars
+    .filter(j => j.modified.getTime() > packModifiedMs)
+    .sort((a, b) => b.modified - a.modified);
+
+  const drift = {
+    checked: true,
+    serverModCount: mods.jars.length,
+    changedSinceExport: newer.length,
+    // Enough to act on without shipping the whole directory listing.
+    changedFiles: newer.slice(0, 10).map(j => j.name),
+    stale: newer.length > 0
+  };
+  drift.message = drift.stale
+    ? `${newer.length} mod file${newer.length === 1 ? "" : "s"} changed after this pack was exported`
+    : "No mod files have changed since this pack was exported";
+  return drift;
+}
+
+function describePack(file, mods) {
   const full = path.join(PACK_DIR, file);
   const stat = fs.statSync(full);
   const info = {
@@ -667,15 +721,18 @@ function describePack(file) {
   } catch (e) {
     info.manifestError = e.message;
   }
+  info.drift = describeDrift(stat.mtime.getTime(), mods);
   return info;
 }
 
 app.get("/api/packs", authMiddleware, requirePermission("download_pack"), (req, res) => {
   try {
     if (!fs.existsSync(PACK_DIR)) return res.json({ packs: [], dir: PACK_DIR });
+    // Scanned once and shared: every pack compares against the same mods/.
+    const mods = scanServerMods();
     const packs = fs.readdirSync(PACK_DIR, { withFileTypes: true })
       .filter(e => e.isFile() && path.extname(e.name).toLowerCase() === ".zip")
-      .map(e => describePack(e.name))
+      .map(e => describePack(e.name, mods))
       .sort((a, b) => b.modified.localeCompare(a.modified));
     res.json({ packs, dir: PACK_DIR });
   } catch (e) {

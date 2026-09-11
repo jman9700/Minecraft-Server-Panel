@@ -522,6 +522,26 @@
       font-family: 'JetBrains Mono', monospace;
     }
     .pack-warn { color: var(--amber); font-size: 12px; margin-top: 6px; }
+    .drift-bar {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+    }
+    .drift-bar.stale   { border-color: var(--amber); background: var(--amber-dim); color: var(--amber); }
+    .drift-bar.current { border-color: var(--green); background: var(--green-dim); color: var(--green); }
+    .drift-bar .drift-detail {
+      color: var(--text-dim);
+      font-size: 12px;
+      margin-top: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      overflow-wrap: anywhere;
+    }
 
     /* ── Demo gallery ─────────────────────────── */
     .gallery-stage {
@@ -1299,6 +1319,45 @@ function formatBytes(n) {
   return (n / 1024 / 1024).toFixed(1) + " MB";
 }
 
+function renderDrift(drift, packModCount) {
+  if (!drift) return null;
+  const bar = document.createElement("div");
+  bar.className = "drift-bar";
+
+  if (!drift.checked) {
+    // Cannot see the server's mods -- say so rather than implying it is fine.
+    bar.textContent = "Cannot check whether this pack is current: " + drift.reason;
+    return bar;
+  }
+
+  bar.classList.add(drift.stale ? "stale" : "current");
+  const head = document.createElement("div");
+
+  const msg = document.createElement("div");
+  msg.textContent = drift.stale
+    ? drift.message + ". Re-export from CurseForge so players stay in sync."
+    : drift.message + ".";
+  head.appendChild(msg);
+
+  const detail = document.createElement("div");
+  detail.className = "drift-detail";
+  const bits = [];
+  if (drift.changedFiles && drift.changedFiles.length) {
+    bits.push("changed: " + drift.changedFiles.join(", ") +
+      (drift.changedSinceExport > drift.changedFiles.length
+        ? ` (+${drift.changedSinceExport - drift.changedFiles.length} more)` : ""));
+  }
+  // Counts are context only. A pack carries client-only mods (shaders and
+  // the like) that never appear server-side, so these differing is normal.
+  bits.push(`server mods: ${drift.serverModCount}` +
+    (packModCount !== null && packModCount !== undefined ? ` | pack lists: ${packModCount}` : ""));
+  detail.textContent = bits.join("  -  ");
+  head.appendChild(detail);
+
+  bar.appendChild(head);
+  return bar;
+}
+
 async function loadPacks() {
   const list = document.getElementById("pack-list");
   const tab = document.getElementById("tab-pack");
@@ -1348,6 +1407,8 @@ async function loadPacks() {
         left.appendChild(warn);
       }
 
+      const btnWrap = document.createElement("div");
+
       const btn = document.createElement("button");
       btn.className = "btn btn-green";
       btn.textContent = "Download";
@@ -1355,6 +1416,11 @@ async function loadPacks() {
 
       card.appendChild(left);
       card.appendChild(btn);
+
+      // The pack is a snapshot; surface it going stale right next to the
+      // download rather than letting players discover it at connect time.
+      const drift = renderDrift(p.drift, p.modCount);
+      if (drift) list.appendChild(drift);
       list.appendChild(card);
     });
     tab.dataset.packState = "ready";
