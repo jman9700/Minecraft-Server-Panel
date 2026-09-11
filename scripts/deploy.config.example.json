@@ -3,7 +3,7 @@
 
   "_paths": "Absolute paths on the box. Backslashes must be doubled -- this is JSON.",
   "repoPath": "C:\\path\\to\\Minecraft-Server-Panel",
-  "panelDir": "C:\\path\\to\\Minecraft-Server-Panel\\mcpanel0.5\\minecraft-panel",
+  "panelDir": "C:\\path\\to\\Minecraft-Server-Panel\\minecraft-panel",
   "_branch": "Always the deploy ref -- CI moves it. Do NOT point this at release or dev directly, or staged PRs will never reach the box. See .github/workflows/playwright.yml.",
   "branch": "deploy",
 
